@@ -3,6 +3,7 @@ import inspect
 from dash import Input, State, Output, callback_context
 import json
 import logging
+from datetime import datetime, timezone
 
 IO_INPUT = 'input'
 IO_STATE = 'state'
@@ -21,9 +22,9 @@ class DashHelper:
     Provides easy access to inputs, states, and trigger information.
     """
 
-    def __init__(self, inputs_def, states_def, outputs_def, args, log_callback=False, callback_name=None):
+    def __init__(self, inputs_def, states_def, outputs_def, args, callback_name=None, debug=False):
         self.ctx = callback_context
-        self.log_callback = log_callback
+        self.debug = debug
         if isinstance(callback_name, str) and callback_name != '':
             self._name = callback_name
         else:
@@ -32,6 +33,7 @@ class DashHelper:
         self._states = {}
         self._outputs = {}
         self._output_order = []
+        self._start = datetime.now(tz=timezone.utc)
 
         # Dash passes arguments as a flattened list: [...inputs, ...states]
         # We map these values back to their definitions based on the order they were defined.
@@ -225,7 +227,7 @@ class DashHelper:
         """Returns a string displaying the value of the callback."""
 
         try:
-            output = f"[{self._name}] trigger component={self.triggered_id} prop={self.triggered_prop}\n"
+            output = f"[{self._name}] Callback Info: trigger component='{self.triggered_id}' prop='{self.triggered_prop}'\n"
 
             input_count = len(self._inputs)
             states_count = len(self._states)
@@ -330,13 +332,33 @@ class DashHelper:
             key, prop = self._make_key(component_id, helper=IO_OUTPUT)
             self.set(component_id=component_id, property_id=prop, value=value)
 
-    def callback_log(self, log_level, event, message):
-        if not self.log_callback and event != LOG_EVENT_NO_CHANGE:
+    def callback_log_done(self, log_level, event, message, show_debug=False):
+        if not self.debug and event != LOG_EVENT_NO_CHANGE:
             return
-        logger.log(log_level, f"[{self._name}] {message}")
+        exc_info = event == LOG_EVENT_ERROR
+        dur = (datetime.now(tz=timezone.utc) - self._start).total_seconds()
+        output = f"[{self._name}] {message} (time={dur}s)"
+        if show_debug is True:
+            output += f"\n{self.debug_str}"
+        logger.log(log_level, output, exc_info=exc_info)
 
     def __str__(self):
         return self.debug_str
+
+
+def get_dash_helper_arg(my_kwargs, field_name):
+    """
+    Return dash helper arg
+    :param my_kwargs: dict of args
+    :param field_name: field to look for
+    :return: found value
+    """
+    if field_name not in my_kwargs:
+        return None
+
+    arg_val = my_kwargs[field_name]
+    del my_kwargs[field_name]
+    return arg_val
 
 
 def dash_helper(app, *args, **kwargs):
@@ -363,35 +385,34 @@ def dash_helper(app, *args, **kwargs):
 
     my_kwargs = kwargs.copy()
     callback_name = None
-    if 'callback_name' in kwargs:
-        callback_name = kwargs['callback_name']
-        del my_kwargs['callback_name']
+
+    callback_name = get_dash_helper_arg(my_kwargs, 'callback_name')
+    debug = get_dash_helper_arg(my_kwargs, 'debug')
 
     def decorator(func):
         @app.callback(*args, **my_kwargs)
         def wrapper(*cb_args):
             try:
                 dh = DashHelper(defined_inputs, defined_states, defined_outputs, cb_args,
-                                log_callback=False, callback_name=callback_name)
+                                callback_name=callback_name, debug=debug)
             except Exception as e:
                 logger.error(f"Error in DashHelper: {e}")
                 return dash.no_update
 
             # If no change, just return no update
             if dh.triggered_id is None:
-                dh.callback_log(logging.DEBUG, LOG_EVENT_NO_CHANGE, "Callback: No change")
+                dh.callback_log_done(logging.DEBUG, LOG_EVENT_NO_CHANGE, "Callback Result: No change")
                 return dash.no_update
 
             try:
                 func(dh)
-                dh.callback_log(logging.INFO, LOG_EVENT_COMPLETED, "Callback: Completed")
+                dh.callback_log_done(logging.INFO, LOG_EVENT_COMPLETED, "Callback Result: Completed")
+                return dh.output
 
             except Exception as e:
-                debug_str = dh.debug_str
-                dh.callback_log(logging.INFO, LOG_EVENT_ERROR, f"Callback: Failed: {e}\n{debug_str}")
+                dh.callback_log_done(logging.INFO, LOG_EVENT_ERROR, f"Callback Result: Failed: {e}",
+                                     show_debug=True)
                 return dash.no_update
-
-            return dh.output
 
         return wrapper
 
