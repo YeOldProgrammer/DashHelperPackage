@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dash-helper"
+version = "0.1.0"
+description = "Summarizes Dash callback arguments into a single object."
+readme = "README.md"
+requires-python = ">=3.7"
+license = {file = "LICENSE"}
+authors = [
+  {name = "Author", email = "author@example.com"}
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "dash>=2.0.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/dash-helper"
+"Bug Tracker" = "https://github.com/yourusername/dash-helper/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
