@@ -414,13 +414,16 @@ def get_dash_helper_arg(my_kwargs, field_name, default_value=None):
     del my_kwargs[field_name]
     return arg_val
 
-def find_control_ids(app, callback_name):
+def find_control_ids(app, callback_name, layout=None):
     # Find location component ID
     control_ids = {}
 
-    if not hasattr(app, 'layout'):
-        raise ValueError('app does not have a layout populated')
-    if not app.layout:
+    if layout is None:
+        if not hasattr(app, 'layout'):
+            raise ValueError('app does not have a layout populated')
+        layout = app.layout
+
+    if not layout:
         raise ValueError('app has a layout but it is is not populated')
 
     try:
@@ -443,7 +446,7 @@ def find_control_ids(app, callback_name):
                     return find_controls(callback_name, children, my_control_ids)
             return None
 
-        find_controls(callback_name, app.layout, control_ids)
+        find_controls(callback_name, layout, control_ids)
 
     except Exception as e:
         raise e
@@ -513,7 +516,9 @@ def dash_helper(app, *args, **kwargs):
     callback_name = get_dash_helper_arg(my_kwargs, 'callback_name')
     debug = get_dash_helper_arg(my_kwargs, 'debug')
     log_on_exit = get_dash_helper_arg(my_kwargs, 'log_on_exit')
-    layout_component_ids = find_control_ids(app, callback_name)
+    layout = get_dash_helper_arg(my_kwargs, 'layout')
+
+    layout_component_ids = find_control_ids(app, callback_name, layout=layout)
     if len(layout_component_ids) == 0:
         raise ValueError(f"Dash App '{app.title}' layout has no components found")
 

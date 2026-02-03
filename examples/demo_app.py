@@ -79,7 +79,8 @@ def update_output_btn1_btn2(dh):
              prevent_initial_call=True,
              callback_name="btn3",
              debug=DEBUG_ENABLED,
-             log_on_exit=True
+             log_on_exit=True,
+             layout=app.layout
              )
 def update_output_btn3(dh):
     # dh is the DashHelper object
