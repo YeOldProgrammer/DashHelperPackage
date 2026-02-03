@@ -23,9 +23,11 @@ class DashHelper:
     Provides easy access to inputs, states, and trigger information.
     """
 
-    def __init__(self, inputs_def, states_def, outputs_def, args, callback_name=None, debug=False, location_id=None):
+    def __init__(self, inputs_def, states_def, outputs_def, args, callback_name=None, debug=False, location_id=None,
+                 log_on_exit=False):
         self.ctx = callback_context
         self.debug = debug
+        self.log_on_exit = log_on_exit
         self.location_id = location_id
         self.location_pathname = None
         self.location_hash = None
@@ -222,7 +224,7 @@ class DashHelper:
         return self.ctx.triggered[0]['prop_id'].rsplit('.', 1)[1]
 
     @property
-    def output(self):
+    def return_value(self):
         """
         The callback should return a list of values as defined by the callbacks output object.   Map the output
         dictionary to this list.
@@ -368,6 +370,21 @@ class DashHelper:
             key, prop = self._make_key(component_id, helper=IO_OUTPUT)
             self.set(component_id=component_id, property_id=prop, value=value)
 
+    def set_list(self, output_list):
+        """ Take a dictionary of output and associated values and call set method on each one """
+        output_list_len = len(output_list)
+        output_callback_len = len(self._output_order)
+        if output_list_len != output_callback_len:
+            error_msg = f"[{self._name}] set_list passed {output_list_len}, expecting {output_callback_len} {self._output_order}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        for idx in range(output_list_len):
+            key = self._output_order[idx]['key']
+            prop = self._output_order[idx]['prop']
+            value = output_list[idx]
+            self.set(component_id=key, property_id=prop, value=value)
+
     def callback_log_done(self, log_level, event, message, show_debug=False):
         if not self.debug and event != LOG_EVENT_NO_CHANGE:
             return
@@ -495,6 +512,7 @@ def dash_helper(app, *args, **kwargs):
     my_kwargs = kwargs.copy()
     callback_name = get_dash_helper_arg(my_kwargs, 'callback_name')
     debug = get_dash_helper_arg(my_kwargs, 'debug')
+    log_on_exit = get_dash_helper_arg(my_kwargs, 'log_on_exit')
     layout_component_ids = find_control_ids(app, callback_name)
     if len(layout_component_ids) == 0:
         raise ValueError(f"Dash App '{app.title}' layout has no components found")
@@ -521,20 +539,33 @@ def dash_helper(app, *args, **kwargs):
         def wrapper(*cb_args):
             try:
                 dh = DashHelper(defined_inputs, defined_states, defined_outputs, cb_args,
-                                callback_name=callback_name, debug=debug, location_id=location_id)
+                                callback_name=callback_name,
+                                debug=debug,
+                                log_on_exit=log_on_exit,
+                                location_id=location_id)
             except Exception as e:
                 logger.error(f"Error in DashHelper: {e}")
                 return dash.no_update
 
             # If no change, just return no update
             if dh.triggered_id is None:
-                dh.callback_log_done(logging.DEBUG, LOG_EVENT_NO_CHANGE, "Callback Result: No change")
+                dh.callback_log_done(logging.DEBUG, LOG_EVENT_NO_CHANGE, "Callback Result: No change",
+                                     show_debug=dh.log_on_exit)
                 return dash.no_update
 
             try:
-                func(dh)
-                dh.callback_log_done(logging.INFO, LOG_EVENT_COMPLETED, "Callback Result: Completed")
-                return dh.output
+                return_value = func(dh)
+
+                # Use return value from method
+                if isinstance(return_value, tuple):
+                    dh.set_list(return_value)
+                elif return_value and return_value != dash.no_update:
+                    dh.set_list([return_value,])
+
+                dh.callback_log_done(logging.INFO, LOG_EVENT_COMPLETED, "Callback Result: Completed",
+                                     show_debug=dh.log_on_exit)
+
+                return dh.return_value
 
             except Exception as e:
                 dh.callback_log_done(logging.INFO, LOG_EVENT_ERROR, f"Callback Result: Failed: {e}",
