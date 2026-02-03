@@ -46,7 +46,7 @@ app.layout = html.Div([
             html.Button("Fail Callback", id=DASH_CONTROL_BUTTON4_INPUT_ID, style={'margin': '10px'}),
         ], style={'display': 'flex', 'padding': '2px', 'border': '1px solid black', 'background': '#ff0000'}),
     ], style={'display': 'flex', 'gap': '10px'}),
-    html.Div(id=DASH_CONTROL_DIV_OUTPUT_ID, style={"marginTop": "20px"})
+    html.Div(id=DASH_CONTROL_DIV_OUTPUT_ID, style={"marginTop": "20px"}),
 ])
 
 @dash_helper(app,

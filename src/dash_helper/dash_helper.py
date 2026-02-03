@@ -278,6 +278,8 @@ class DashHelper:
             for output_id, output_val in self._outputs.items():
                 if output_val == dash.no_update:
                     output += f"    {output_id}: None\n"
+                elif isinstance(output_val, dict) and 'children' in output_val and output_val['children'] == dash.no_update and len(output_val) == 1:
+                    output += f"    {output_id}: {{'children': None}}\n"
                 else:
                     output += f"    {output_id}: {output_val}\n"
 
@@ -409,8 +411,8 @@ def find_control_ids(app, callback_name):
             if hasattr(component, 'id'):
                 my_type = type(component).__name__
                 if component.id in my_control_ids:
-                    raise ValueError(f"Control ID '{component.id}' has been used multiple times in call back "
-                                     "'{callback_name}' first='{my_control_ids[component.id]}' second='{my_type}'")
+                    raise ValueError(f"Control ID '{component.id}' has been used multiple times in the layout "
+                                     f"'{callback_name}' first='{my_control_ids[component.id]}' second='{my_type}'")
                 else:
                     my_control_ids[component.id] = my_type
 
@@ -426,19 +428,19 @@ def find_control_ids(app, callback_name):
 
         find_controls(callback_name, app.layout, control_ids)
 
-    except Exception:
-        control_ids = {}
+    except Exception as e:
+        raise e
 
     return control_ids
 
 def validate_component(app, callback_name, component_group, component_list, layout_component_ids):
-    strict = app.config['suppress_callback_exceptions']
+    strict = not app.config['suppress_callback_exceptions']
     for callback_component in component_list:
         component_id = callback_component.component_id
         component_type = layout_component_ids.get(component_id, None)
         if not component_type:
             if strict:
-                raise ValueError(f"App '{app.title}' callback '{callback_name}' has {component_group} id '{component_id}' that is not found on layout.   Valid ids are {list(layout_component_ids.keys())}")
+                raise ValueError(f"App '{app.title}' callback '{callback_name}' has {component_group} id '{component_id}' that is not found on layout.   Valid component ids are {list(layout_component_ids.keys())}")
 
 def add_location_info(flat_args, location_id, defined_states, args):
     location_pathname_found = False
@@ -494,6 +496,8 @@ def dash_helper(app, *args, **kwargs):
     callback_name = get_dash_helper_arg(my_kwargs, 'callback_name')
     debug = get_dash_helper_arg(my_kwargs, 'debug')
     layout_component_ids = find_control_ids(app, callback_name)
+    if len(layout_component_ids) == 0:
+        raise ValueError(f"Dash App '{app.title}' layout has no components found")
 
     # Extract definitions
     defined_inputs = [x for x in flat_args if isinstance(x, Input)]
