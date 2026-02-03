@@ -51,8 +51,7 @@ app.layout = html.Div([
     html.Div(id=DASH_CONTROL_DIV_OUTPUT_ID1, style={"marginTop": "20px"}),
 ])
 
-@dash_helper(app,
-             Output(DASH_CONTROL_DIV_OUTPUT_ID1, DASH_CONTROL_DIV_OUTPUT_PROP, allow_duplicate=True),
+@dash_helper(Output(DASH_CONTROL_DIV_OUTPUT_ID1, DASH_CONTROL_DIV_OUTPUT_PROP, allow_duplicate=True),
              Input(DASH_CONTROL_BUTTON1_INPUT_ID, DASH_CONTROL_BUTTON_INPUT_PROP),
              Input(DASH_CONTROL_BUTTON2_INPUT_ID, DASH_CONTROL_BUTTON_INPUT_PROP),
              prevent_initial_call=True,
@@ -73,8 +72,7 @@ def update_output_btn1_btn2(dh):
     if CALLBACK_INFO_ENABLED:
         logger.info(dh)
 
-@dash_helper(app,
-             Output(DASH_CONTROL_DIV_OUTPUT_ID1, DASH_CONTROL_DIV_OUTPUT_PROP, allow_duplicate=True),
+@dash_helper(Output(DASH_CONTROL_DIV_OUTPUT_ID1, DASH_CONTROL_DIV_OUTPUT_PROP, allow_duplicate=True),
              Input(DASH_CONTROL_BUTTON3_INPUT_ID, DASH_CONTROL_BUTTON_INPUT_PROP),
              prevent_initial_call=True,
              callback_name="btn3",
@@ -93,12 +91,12 @@ def update_output_btn3(dh):
         # dh.set(DASH_CONTROL_DIV_OUTPUT_ID1, DASH_CONTROL_DIV_OUTPUT_PROP, "No clicks yet.")
         return "No clicks yet."
 
-@dash_helper(app,
-             Output(DASH_CONTROL_DIV_OUTPUT_ID1, DASH_CONTROL_DIV_OUTPUT_PROP, allow_duplicate=True),
+@dash_helper(Output(DASH_CONTROL_DIV_OUTPUT_ID1, DASH_CONTROL_DIV_OUTPUT_PROP, allow_duplicate=True),
              Input(DASH_CONTROL_BUTTON4_INPUT_ID, DASH_CONTROL_BUTTON_INPUT_PROP),
              prevent_initial_call=True,
              callback_name="btn4_fail",
-             debug=DEBUG_ENABLED
+             debug=DEBUG_ENABLED,
+             app=app
              )
 def update_output_fail_btn4(dh):
     # dh is the DashHelper object

@@ -1,6 +1,6 @@
 import dash
 import inspect
-from dash import Input, State, Output, callback_context
+from dash import Input, State, Output, callback_context, get_app
 import json
 import logging
 from datetime import datetime, timezone
@@ -498,7 +498,7 @@ def add_location_info(flat_args, location_id, defined_states, args):
         defined_states.append(new_state)
         args.append(new_state)
 
-def dash_helper(app, *args, **kwargs):
+def dash_helper(*args, **kwargs):
     """
     Decorator that replaces app.callback.
     It wraps the callback function, passing a single DashHelper object
@@ -520,6 +520,14 @@ def dash_helper(app, *args, **kwargs):
     line = caller_frame.lineno
 
     my_kwargs = kwargs.copy()
+    app = get_dash_helper_arg(my_kwargs, 'app')
+    if app is None:
+        app = get_app()
+        if app is None:
+            error = "No dash application found initialized"
+            LOGGER.error(error)
+            raise LookupError(error)
+
     callback_name = get_dash_helper_arg(my_kwargs, 'callback_name')
     debug = get_dash_helper_arg(my_kwargs, 'debug')
     log_on_exit = get_dash_helper_arg(my_kwargs, 'log_on_exit')
@@ -527,7 +535,9 @@ def dash_helper(app, *args, **kwargs):
 
     layout_component_ids = find_control_ids(app, callback_name, layout=layout)
     if len(layout_component_ids) == 0:
-        raise ValueError(f"Dash App '{app.title}' layout has no components found")
+        error = f"Dash App '{app.title}' layout has no components found"
+        LOGGER.error(error)
+        raise ValueError(error)
 
     # Extract definitions
     defined_inputs = [x for x in flat_args if isinstance(x, Input)]
