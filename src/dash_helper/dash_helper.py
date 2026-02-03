@@ -556,49 +556,7 @@ def dash_helper(*args, **kwargs):
         add_location_info(flat_args, location_id, defined_states, my_args)
         args = tuple(my_args)
 
-    def decorator(func):
-        @app.callback(*args, **my_kwargs)
-        def wrapper(*cb_args):
-            try:
-                dh = DashHelper(defined_inputs, defined_states, defined_outputs, cb_args,
-                                callback_name=callback_name,
-                                debug=debug,
-                                file=file,
-                                line=line,
-                                log_on_exit=log_on_exit,
-                                location_id=location_id)
-            except Exception as e:
-                LOGGER.error(f"Error in DashHelper: {e}")
-                return dash.no_update
-
-            # If no change, just return no update
-            if dh.triggered_id is None:
-                dh.callback_log_done(logging.DEBUG, LOG_EVENT_NO_CHANGE, "Callback Result: No change",
-                                     show_debug=dh.log_on_exit)
-                return dash.no_update
-
-            try:
-                return_value = func(dh)
-
-                # Use return value from method
-                if isinstance(return_value, tuple):
-                    dh.set_list(return_value)
-                elif return_value and return_value != dash.no_update:
-                    dh.set_list([return_value,])
-
-                dh.callback_log_done(logging.INFO, LOG_EVENT_COMPLETED, "Callback Result: Completed",
-                                     show_debug=dh.log_on_exit)
-
-                return dh.return_value
-
-            except Exception as e:
-                dh.callback_log_done(logging.INFO, LOG_EVENT_ERROR, f"Callback Result: Failed: {e}",
-                                     show_debug=True)
-                return dash.no_update
-
-        return wrapper
-
-    if debug:
+    def display_dash_helper_init():
         debug_str = f"Registered Callback [{callback_name}] at {file}:{line}\n"
         layout_info = []
         for component_id, component_type in layout_component_ids.items():
@@ -661,5 +619,50 @@ def dash_helper(*args, **kwargs):
         table_str = table_str.replace('\n', '\n    ')
         debug_str += '  ' + table_str + '\n'
         LOGGER.info(debug_str)
+
+    def decorator(func):
+        @app.callback(*args, **my_kwargs)
+        def wrapper(*cb_args):
+            try:
+                dh = DashHelper(defined_inputs, defined_states, defined_outputs, cb_args,
+                                callback_name=callback_name,
+                                debug=debug,
+                                file=file,
+                                line=line,
+                                log_on_exit=log_on_exit,
+                                location_id=location_id)
+            except Exception as e:
+                LOGGER.error(f"Error in DashHelper: {e}")
+                return dash.no_update
+
+            # If no change, just return no update
+            if dh.triggered_id is None:
+                dh.callback_log_done(logging.DEBUG, LOG_EVENT_NO_CHANGE, "Callback Result: No change",
+                                     show_debug=dh.log_on_exit)
+                return dash.no_update
+
+            try:
+                return_value = func(dh)
+
+                # Use return value from method
+                if isinstance(return_value, tuple):
+                    dh.set_list(return_value)
+                elif return_value and return_value != dash.no_update:
+                    dh.set_list([return_value,])
+
+                dh.callback_log_done(logging.INFO, LOG_EVENT_COMPLETED, "Callback Result: Completed",
+                                     show_debug=dh.log_on_exit)
+
+                return dh.return_value
+
+            except Exception as e:
+                dh.callback_log_done(logging.INFO, LOG_EVENT_ERROR, f"Callback Result: Failed: {e}",
+                                     show_debug=True)
+                return dash.no_update
+
+        return wrapper
+
+    if debug:
+        display_dash_helper_init()
 
     return decorator
