@@ -5,6 +5,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from urllib.parse import parse_qs
+from tabulate import tabulate
 
 IO_INPUT = 'input'
 IO_STATE = 'state'
@@ -14,7 +15,7 @@ LOG_EVENT_NO_CHANGE = 'no_change'
 LOG_EVENT_ERROR = 'error'
 LOG_EVENT_COMPLETED = 'completed'
 
-logger = logging.getLogger('dash_helper')
+LOGGER = logging.getLogger('dash_helper')
 
 
 class DashHelper:
@@ -24,8 +25,10 @@ class DashHelper:
     """
 
     def __init__(self, inputs_def, states_def, outputs_def, args, callback_name=None, debug=False, location_id=None,
-                 log_on_exit=False):
+                 log_on_exit=False, file=None, line=None):
         self.ctx = callback_context
+        self.file = file
+        self.line = line
         self.debug = debug
         self.log_on_exit = log_on_exit
         self.location_id = location_id
@@ -56,7 +59,7 @@ class DashHelper:
                 key, prop = self._make_key(definition)
             except Exception as e:
                 error_msg = f"[{self._name}] Unable to process input ({count}) '{definition.component_id}': {e}"
-                logger.error(error_msg)
+                LOGGER.error(error_msg)
                 raise ValueError(error_msg)
 
             if key not in self._inputs:
@@ -71,7 +74,7 @@ class DashHelper:
                 key, prop = self._make_key(definition)
             except Exception as e:
                 error_msg = f"[{self._name}] Unable to process input ({count}) '{definition.component_id}': {e}"
-                logger.error(error_msg)
+                LOGGER.error(error_msg)
                 raise ValueError(error_msg)
             if key not in self._states:
                 self._states[key] = {}
@@ -85,7 +88,7 @@ class DashHelper:
             for prop in self._inputs[key]:
                 if prop in self._states[key]:
                     error_msg = f"[{self._name}] input and state both have key='{key}' and property='{prop}'"
-                    logger.error(error_msg)
+                    LOGGER.error(error_msg)
                     raise ValueError(error_msg)
 
         # Map outputs
@@ -96,7 +99,7 @@ class DashHelper:
                 key, prop = self._make_key(definition)
             except Exception as e:
                 error_msg = f"[{self._name}] Unable to process input ({count}) '{definition.component_id}': {e}"
-                logger.error(error_msg)
+                LOGGER.error(error_msg)
                 raise ValueError(error_msg)
             self._output_order.append({'key': key, 'prop': prop})
             if key not in self._outputs:
@@ -130,14 +133,14 @@ class DashHelper:
                 definition_list = definition.split(':')
                 if len(definition_list) != 2:
                     error_msg = f"[{self._name}] Key '{definition}' should only have 2 tokens"
-                    logger.error(error_msg)
+                    LOGGER.error(error_msg)
                     raise ValueError(error_msg)
                 cid, cp = definition_list
             else:
                 cid = definition
         else:
             error_msg = f"[{self._name}] Key '{definition}' is not a Input, Output, State object or dict or str"
-            logger.error(error_msg)
+            LOGGER.error(error_msg)
             raise ValueError(error_msg)
 
         if property_id is not None:
@@ -146,36 +149,36 @@ class DashHelper:
         if isinstance(cid, dict):
             if 'type' not in cid:
                 error_msg = f"[{self._name}] Unable to find 'type' in key dict '{cid}'"
-                logger.error(error_msg)
+                LOGGER.error(error_msg)
                 raise ValueError(error_msg)
 
             cid = cid['type']
 
         elif not isinstance(cid, str):
             error_msg = f"[{self._name}] Key is not 'str' or 'dict' '{cid}'"
-            logger.error(error_msg)
+            LOGGER.error(error_msg)
             raise ValueError(error_msg)
 
         if cp is None and isinstance(helper, (list, str)):
             if cid not in mapping_dict:
                 error_msg = f"[{self._name}] Key '{cid}' does not exist in '{helper}'"
-                logger.error(error_msg)
+                LOGGER.error(error_msg)
                 raise ValueError(error_msg)
             if len(mapping_dict[cid]) != 1:
                 error_msg = f"[{self._name}] Key '{cid}' has multiple property_ids"
-                logger.error(error_msg)
+                LOGGER.error(error_msg)
                 raise ValueError(error_msg)
             cp = list(mapping_dict[cid].keys())[0]
 
         if not isinstance(cp, str):
             if cid not in mapping_dict:
                 error_msg = f"[{self._name}] Key '{cid}' property is not a str ({cp})"
-                logger.error(error_msg)
+                LOGGER.error(error_msg)
                 raise ValueError(error_msg)
             else:
                 cp_list = list(mapping_dict[cid].keys())
                 error_msg = f"[{self._name}] Key '{cid}' property is not a str ({cp}) valid {cp_list}"
-                logger.error(error_msg)
+                LOGGER.error(error_msg)
                 raise ValueError(error_msg)
 
         return cid, cp
@@ -236,11 +239,11 @@ class DashHelper:
             prop = output_field['prop']
             if key not in self._outputs:
                 error_msg = f"[{self._name}] Key '{key}' does not exist in outputs"
-                logger.error(error_msg)
+                LOGGER.error(error_msg)
                 raise ValueError(error_msg)
             if prop not in self._outputs[key]:
                 error_msg = f"[{self._name}] Key '{key}' Prop: '{prop}' does not exist in outputs"
-                logger.error(error_msg)
+                LOGGER.error(error_msg)
                 raise ValueError(error_msg)
             output_list.append(self._outputs[key][prop])
         
@@ -287,7 +290,7 @@ class DashHelper:
 
         except Exception as e:
             output = '<<<error generating output>>>'
-            logger.error("Failed to generate output: %s", e, exc_info=True)
+            LOGGER.error("Failed to generate output: %s", e, exc_info=True)
 
         return output
 
@@ -305,7 +308,7 @@ class DashHelper:
             return self._outputs
         else:
             output = f"Invalid IO Type '{io_type}'"
-            logger.error(output, exc_info=True)
+            LOGGER.error(output, exc_info=True)
             raise ValueError(output)
 
     def _find_callback_io_dict(self, io_list, component_id, property_id=None, allow_invalid=False):
@@ -322,7 +325,7 @@ class DashHelper:
                     if len(self._outputs[key]) != 1:
                         caller_frame = inspect.stack()[1]
                         error_msg = f"[{self._name}] io='{io_type}' component_id='{component_id}' has multiple properties defined (file: {caller_frame.filename}, line: {caller_frame.lineno})"
-                        logger.error(error_msg)
+                        LOGGER.error(error_msg)
                         raise ValueError(error_msg)
 
                     prop = list(io_dict[key].keys())[0]
@@ -333,7 +336,7 @@ class DashHelper:
         # If we are here we didn't find a match on the key/prop
         if not allow_invalid:
             error_msg = f"[{self._name}] io='{io_list}' component_id='{component_id}' property_id='{property_id}'"
-            logger.error(error_msg)
+            LOGGER.error(error_msg)
             raise ValueError(error_msg)
 
         return None, component_id, property_id
@@ -376,7 +379,7 @@ class DashHelper:
         output_callback_len = len(self._output_order)
         if output_list_len != output_callback_len:
             error_msg = f"[{self._name}] set_list passed {output_list_len}, expecting {output_callback_len} {self._output_order}"
-            logger.error(error_msg)
+            LOGGER.error(error_msg)
             raise ValueError(error_msg)
 
         for idx in range(output_list_len):
@@ -393,7 +396,7 @@ class DashHelper:
         output = f"[{self._name}] {message} (time={dur}s)"
         if show_debug is True:
             output += f"\n{self.debug_str}"
-        logger.log(log_level, output, exc_info=exc_info)
+        LOGGER.log(log_level, output, exc_info=exc_info)
 
     def __str__(self):
         return self.debug_str
@@ -512,6 +515,10 @@ def dash_helper(app, *args, **kwargs):
 
     flatten(args)
 
+    caller_frame = inspect.stack()[1]
+    file = caller_frame.filename
+    line = caller_frame.lineno
+
     my_kwargs = kwargs.copy()
     callback_name = get_dash_helper_arg(my_kwargs, 'callback_name')
     debug = get_dash_helper_arg(my_kwargs, 'debug')
@@ -546,10 +553,12 @@ def dash_helper(app, *args, **kwargs):
                 dh = DashHelper(defined_inputs, defined_states, defined_outputs, cb_args,
                                 callback_name=callback_name,
                                 debug=debug,
+                                file=file,
+                                line=line,
                                 log_on_exit=log_on_exit,
                                 location_id=location_id)
             except Exception as e:
-                logger.error(f"Error in DashHelper: {e}")
+                LOGGER.error(f"Error in DashHelper: {e}")
                 return dash.no_update
 
             # If no change, just return no update
@@ -578,5 +587,69 @@ def dash_helper(app, *args, **kwargs):
                 return dash.no_update
 
         return wrapper
+
+    if debug:
+        debug_str = f"Registered Callback [{callback_name}] at {file}:{line}\n"
+        layout_info = []
+        for component_id, component_type in layout_component_ids.items():
+            input_list = []
+            state_list = []
+            output_list = []
+
+            for component in defined_inputs:
+                if component.component_id == component_id:
+                    input_list.append(component.component_property)
+
+            for component in defined_states:
+                if component.component_id == component_id:
+                    state_list.append(component.component_property)
+
+            for component in defined_outputs:
+                if component.component_id == component_id:
+                    output_list.append(component.component_property)
+
+            layout_dict = {
+                'component_id': component_id,
+                'component_type': component_type,
+                'input': ', '.join(input_list),
+                'state': ', '.join(state_list),
+                'output': ', '.join(output_list)
+            }
+            layout_info.append(layout_dict)
+
+        for component in defined_inputs:
+            if component.component_id not in layout_component_ids:
+                layout_info.append({
+                    'component_id': component.component_id,
+                    'component_type': '???',
+                    'input': component.component_type,
+                    'state': '',
+                    'output': '',
+                })
+
+        for component in defined_states:
+            if component.component_id not in layout_component_ids:
+                layout_info.append({
+                    'component_id': component.component_id,
+                    'component_type': '???',
+                    'input': '',
+                    'state': '',
+                    'output': component.component_type,
+                })
+
+        for component in defined_outputs:
+            if component.component_id not in layout_component_ids:
+                layout_info.append({
+                    'component_id': component.component_id,
+                    'component_type': '???',
+                    'input': '',
+                    'state': '',
+                    'output': component.component_type,
+                })
+
+        table_str = tabulate(layout_info, headers='keys', tablefmt='psql')
+        table_str = table_str.replace('\n', '\n    ')
+        debug_str += '  ' + table_str + '\n'
+        LOGGER.info(debug_str)
 
     return decorator
