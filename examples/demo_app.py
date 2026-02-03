@@ -1,5 +1,5 @@
 import dash
-from dash import html, Input, Output
+from dash import html, Input, Output, State, dcc
 import sys
 import os
 import logging
@@ -33,6 +33,7 @@ CALLBACK_INFO_ENABLED = True
 
 app.layout = html.Div([
     html.H1("Dash Helper Demo"),
+    dcc.Location(id='url', refresh=False),
     html.Div([
         html.Div([
             html.Button("Click Me", id=DASH_CONTROL_BUTTON1_INPUT_ID, style={'margin': '10px'}),

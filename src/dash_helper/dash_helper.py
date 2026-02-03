@@ -4,6 +4,7 @@ from dash import Input, State, Output, callback_context
 import json
 import logging
 from datetime import datetime, timezone
+from urllib.parse import parse_qs
 
 IO_INPUT = 'input'
 IO_STATE = 'state'
@@ -22,9 +23,13 @@ class DashHelper:
     Provides easy access to inputs, states, and trigger information.
     """
 
-    def __init__(self, inputs_def, states_def, outputs_def, args, callback_name=None, debug=False):
+    def __init__(self, inputs_def, states_def, outputs_def, args, callback_name=None, debug=False, location_id=None):
         self.ctx = callback_context
         self.debug = debug
+        self.location_id = location_id
+        self.location_pathname = None
+        self.location_hash = None
+        self.location_params = {}
         if isinstance(callback_name, str) and callback_name != '':
             self._name = callback_name
         else:
@@ -95,6 +100,9 @@ class DashHelper:
             if key not in self._outputs:
                 self._outputs[key] = {}
             self._outputs[key][prop] = dash.no_update
+
+        if location_id:
+            self._find_location()
 
     def _make_key(self, definition, property_id=None, helper=None):
         """Convert component_id to a hashable key (string or JSON for dicts)."""
@@ -170,6 +178,24 @@ class DashHelper:
 
         return cid, cp
 
+    def _find_location(self):
+        location_component = self._states.get(self.location_id, {})
+        self.location_pathname = location_component.get('pathname', None)
+        self.location_hash = location_component.get('hash', None)
+        params = location_component.get('search', None)
+        if params:
+            # Remove leading '?' if present
+            if params.startswith('?'):
+                params = params[1:]
+            
+            # Parse query string into a dictionary
+            parsed_params = parse_qs(params)
+            
+            # parse_qs returns values as lists, flatten them if single value
+            self.location_params = {k: v[0] if len(v) == 1 else v for k, v in parsed_params.items()}
+        else:
+            self.location_params = {}
+
     @property
     def triggered_id(self):
         """Returns the ID of the component that triggered the callback."""
@@ -229,18 +255,26 @@ class DashHelper:
         try:
             output = f"[{self._name}] Callback Info: trigger component='{self.triggered_id}' prop='{self.triggered_prop}'\n"
 
+            output += f"Location:\n"
+            if self.location_id:
+                output += f"    pathname='{self.location_pathname}'\n"
+                output += f"    params={self.location_params}\n"
+                output += f"    hash='{self.location_hash}'\n"
+            else:
+                output += f"    None\n"
+
             input_count = len(self._inputs)
             states_count = len(self._states)
             output_count = len(self._outputs)
-            output += f"Inputs({input_count})\n"
+            output += f"Inputs ({input_count}):\n"
             for input_id, input_val in self._inputs.items():
                 output += f"    {input_id}: {input_val}\n"
 
-            output += f"States({states_count})\n"
+            output += f"States ({states_count}):\n"
             for state_id, state_val in self._states.items():
                 output += f"    {state_id}: {state_val}\n"
 
-            output += f"Outputs({output_count})\n"
+            output += f"Outputs ({output_count}):\n"
             for output_id, output_val in self._outputs.items():
                 if output_val == dash.no_update:
                     output += f"    {output_id}: None\n"
@@ -346,20 +380,98 @@ class DashHelper:
         return self.debug_str
 
 
-def get_dash_helper_arg(my_kwargs, field_name):
+def get_dash_helper_arg(my_kwargs, field_name, default_value=None):
     """
     Return dash helper arg
     :param my_kwargs: dict of args
     :param field_name: field to look for
+    :param default_value: default value to return if not found
     :return: found value
     """
     if field_name not in my_kwargs:
-        return None
+        return default_value
 
-    arg_val = my_kwargs[field_name]
+    arg_val = my_kwargs.get(field_name, default_value)
     del my_kwargs[field_name]
     return arg_val
 
+def find_control_ids(app, callback_name):
+    # Find location component ID
+    control_ids = {}
+
+    if not hasattr(app, 'layout'):
+        raise ValueError('app does not have a layout populated')
+    if not app.layout:
+        raise ValueError('app has a layout but it is is not populated')
+
+    try:
+        def find_controls(callback_name, component, my_control_ids):
+            if hasattr(component, 'id'):
+                my_type = type(component).__name__
+                if component.id in my_control_ids:
+                    raise ValueError(f"Control ID '{component.id}' has been used multiple times in call back "
+                                     "'{callback_name}' first='{my_control_ids[component.id]}' second='{my_type}'")
+                else:
+                    my_control_ids[component.id] = my_type
+
+            if hasattr(component, 'children'):
+                children = component.children
+                if isinstance(children, list):
+                    for child in children:
+                        res = find_controls(callback_name, child, my_control_ids)
+                        if res: return res
+                elif children:
+                    return find_controls(callback_name, children, my_control_ids)
+            return None
+
+        find_controls(callback_name, app.layout, control_ids)
+
+    except Exception:
+        control_ids = {}
+
+    return control_ids
+
+def validate_component(app, callback_name, component_group, component_list, layout_component_ids):
+    strict = app.config['suppress_callback_exceptions']
+    for callback_component in component_list:
+        component_id = callback_component.component_id
+        component_type = layout_component_ids.get(component_id, None)
+        if not component_type:
+            if strict:
+                raise ValueError(f"App '{app.title}' callback '{callback_name}' has {component_group} id '{component_id}' that is not found on layout.   Valid ids are {list(layout_component_ids.keys())}")
+
+def add_location_info(flat_args, location_id, defined_states, args):
+    location_pathname_found = False
+    location_search_found = False
+    location_hash_found = False
+
+    for component in flat_args:
+        if isinstance(component, Input) or isinstance(component, State):
+            if component.component_id == location_id:
+                if component.component_property.lower() == 'pathname':
+                    location_pathname_found = True
+                elif component.component_property.lower() == 'search':
+                    location_search_found = True
+                elif component.component_property.lower() == 'hash':
+                    location_hash_found = True
+
+        else:
+            continue
+
+    if not location_pathname_found:
+        new_state = State(location_id, 'pathname')
+        defined_states.append(new_state)
+        args.append(new_state)
+
+    if not location_search_found:
+        new_state = State(location_id, 'search')
+        defined_states.append(new_state)
+        args.append(new_state)
+
+    if not location_hash_found:
+        new_state = State(location_id, 'hash')
+        defined_states.append(new_state)
+        args.append(new_state)
 
 def dash_helper(app, *args, **kwargs):
     """
@@ -378,23 +490,34 @@ def dash_helper(app, *args, **kwargs):
 
     flatten(args)
 
+    my_kwargs = kwargs.copy()
+    callback_name = get_dash_helper_arg(my_kwargs, 'callback_name')
+    debug = get_dash_helper_arg(my_kwargs, 'debug')
+    layout_component_ids = find_control_ids(app, callback_name)
+
     # Extract definitions
     defined_inputs = [x for x in flat_args if isinstance(x, Input)]
     defined_states = [x for x in flat_args if isinstance(x, State)]
     defined_outputs = [x for x in flat_args if isinstance(x, Output)]
 
-    my_kwargs = kwargs.copy()
-    callback_name = None
+    # Make sure input / state / output IDs all exist in layout - note not existing is fine
+    validate_component(app, callback_name, 'input', defined_inputs, layout_component_ids)
+    validate_component(app, callback_name, 'state', defined_states, layout_component_ids)
+    validate_component(app, callback_name, 'output', defined_outputs, layout_component_ids)
+    location_id = next((k for k, v in layout_component_ids.items() if v == 'Location'), None)
 
-    callback_name = get_dash_helper_arg(my_kwargs, 'callback_name')
-    debug = get_dash_helper_arg(my_kwargs, 'debug')
+    # If a location is present in the layout, but not present in an input or states, add it in as a state
+    if location_id:
+        my_args = list(args)
+        add_location_info(flat_args, location_id, defined_states, my_args)
+        args = tuple(my_args)
 
     def decorator(func):
         @app.callback(*args, **my_kwargs)
         def wrapper(*cb_args):
             try:
                 dh = DashHelper(defined_inputs, defined_states, defined_outputs, cb_args,
-                                callback_name=callback_name, debug=debug)
+                                callback_name=callback_name, debug=debug, location_id=location_id)
             except Exception as e:
                 logger.error(f"Error in DashHelper: {e}")
                 return dash.no_update
