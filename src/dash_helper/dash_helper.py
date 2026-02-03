@@ -17,6 +17,8 @@ LOG_EVENT_COMPLETED = 'completed'
 
 LOGGER = logging.getLogger('dash_helper')
 
+DEBUG_INDENT = '  '
+
 
 class DashHelper:
     """
@@ -616,8 +618,8 @@ def dash_helper(*args, **kwargs):
                 })
 
         table_str = tabulate(layout_info, headers='keys', tablefmt='psql')
-        table_str = table_str.replace('\n', '\n    ')
-        debug_str += '  ' + table_str + '\n'
+        table_str = table_str.replace('\n', '\n' + DEBUG_INDENT)
+        debug_str += DEBUG_INDENT + table_str + '\n'
         LOGGER.info(debug_str)
 
     def decorator(func):
