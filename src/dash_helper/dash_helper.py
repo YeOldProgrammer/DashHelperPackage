@@ -1,6 +1,14 @@
+"""
+Dash helper logic.   Simplify the passing of data into and out of a dash callback.
+  - instead of passing input and output based on a strict ordering, can specify key/values of only the fields you care about
+  - better ability to catch incorrect callback values to speed up development
+  - enhanced logging / debugging
+  - easier to detach callback to allow for standalone testing
+"""
 import dash
 import inspect
-from dash import Input, State, Output, callback_context, get_app
+import dash
+from dash.dependencies import ComponentIdType
 import json
 import logging
 from datetime import datetime, timezone
@@ -26,9 +34,15 @@ class DashHelper:
     Provides easy access to inputs, states, and trigger information.
     """
 
-    def __init__(self, inputs_def, states_def, outputs_def, args, callback_name=None, debug=False, location_id=None,
-                 log_on_exit=False, file=None, line=None):
-        self.ctx = callback_context
+    def __init__(self, inputs_def, states_def, outputs_def, args=None, callback_name=None, debug=False, location_id=None,
+                 log_on_exit=False, file=None, line=None, standalone_mode = False, trigger_id=None, trigger_prop=None,
+                 func=None):
+        self.standalone_mode = standalone_mode
+        if self.standalone_mode is False:
+            self.ctx = dash.callback_context
+        else:
+            self.ctx = None
+
         self.file = file
         self.line = line
         self.debug = debug
@@ -36,7 +50,12 @@ class DashHelper:
         self.location_id = location_id
         self.location_pathname = None
         self.location_hash = None
+        self.trigger_id = trigger_id
+        self.trigger_prop = trigger_prop
         self.location_params = {}
+        if args is None:
+            args = []
+
         if isinstance(callback_name, str) and callback_name != '':
             self._name = callback_name
         else:
@@ -125,7 +144,7 @@ class DashHelper:
                             mapping_dict[helper_key] = helper_value
 
         cp = None
-        if isinstance(definition, (Input, State, Output)):
+        if isinstance(definition, (dash.Input, dash.State, dash.Output)):
             cid = definition.component_id
             cp = definition.component_property
         elif isinstance(definition, dict):
@@ -206,6 +225,9 @@ class DashHelper:
     @property
     def triggered_id(self):
         """Returns the ID of the component that triggered the callback."""
+        if self.ctx is None:
+            return self.trigger_id
+
         if not self.ctx.triggered:
             return None
 
@@ -224,6 +246,9 @@ class DashHelper:
     @property
     def triggered_prop(self):
         """Returns the property name that triggered the callback (e.g., 'n_clicks', 'value')."""
+        if not self.ctx:
+            return self.trigger_prop
+
         if not self.ctx.triggered:
             return None
         return self.ctx.triggered[0]['prop_id'].rsplit('.', 1)[1]
@@ -473,7 +498,7 @@ def add_location_info(flat_args, location_id, defined_states, args):
     location_hash_found = False
 
     for component in flat_args:
-        if isinstance(component, Input) or isinstance(component, State):
+        if isinstance(component, dash.Input) or isinstance(component, dash.State):
             if component.component_id == location_id:
                 if component.component_property.lower() == 'pathname':
                     location_pathname_found = True
@@ -486,17 +511,17 @@ def add_location_info(flat_args, location_id, defined_states, args):
             continue
 
     if not location_pathname_found:
-        new_state = State(location_id, 'pathname')
+        new_state = dash.State(location_id, 'pathname')
         defined_states.append(new_state)
         args.append(new_state)
 
     if not location_search_found:
-        new_state = State(location_id, 'search')
+        new_state = dash.State(location_id, 'search')
         defined_states.append(new_state)
         args.append(new_state)
 
     if not location_hash_found:
-        new_state = State(location_id, 'hash')
+        new_state = dash.State(location_id, 'hash')
         defined_states.append(new_state)
         args.append(new_state)
 
@@ -524,7 +549,7 @@ def dash_helper(*args, **kwargs):
     my_kwargs = kwargs.copy()
     app = get_dash_helper_arg(my_kwargs, 'app')
     if app is None:
-        app = get_app()
+        app = dash.get_app()
         if app is None:
             error = "No dash application found initialized"
             LOGGER.error(error)
@@ -542,9 +567,9 @@ def dash_helper(*args, **kwargs):
         raise ValueError(error)
 
     # Extract definitions
-    defined_inputs = [x for x in flat_args if isinstance(x, Input)]
-    defined_states = [x for x in flat_args if isinstance(x, State)]
-    defined_outputs = [x for x in flat_args if isinstance(x, Output)]
+    defined_inputs = [x for x in flat_args if isinstance(x, dash.Input)]
+    defined_states = [x for x in flat_args if isinstance(x, dash.State)]
+    defined_outputs = [x for x in flat_args if isinstance(x, dash.Output)]
 
     # Make sure input / state / output IDs all exist in layout - note not existing is fine
     validate_component(app, callback_name, 'input', defined_inputs, layout_component_ids)
@@ -668,3 +693,110 @@ def dash_helper(*args, **kwargs):
         display_dash_helper_init()
 
     return decorator
+
+
+def dash_helper_register(*args, **kwargs):
+    func = get_dash_helper_arg(kwargs, 'func')
+    if func is None:
+        raise ValueError("dash_helper_register requires a 'func' argument")
+
+    # Call the dash_helper decorator logic
+    # dash_helper returns a decorator, which we then call with the function
+    decorator = dash_helper(*args, **kwargs)
+    decorator(func)
+
+
+class Output():  # pylint: disable=too-few-public-methods
+    def __init__(
+        self,
+        component_id: ComponentIdType,
+        component_property: str,
+        allow_duplicate: bool = False,
+    ):
+        self.component_id = component_id
+        self.component_property = component_property
+        self.allow_duplicate = allow_duplicate
+
+    def to_obj(self):
+        return dash.Output(component_id=self.component_id,
+                           component_property=self.component_property,
+                           allow_duplicate=self.allow_duplicate
+                           )
+
+
+class Input():  # pylint: disable=too-few-public-methods
+    """Input of callback: trigger an update when it is updated."""
+
+    def __init__(
+        self,
+        component_id: ComponentIdType,
+        component_property: str,
+        allow_optional: bool = False,
+        trigger: bool = False,
+        value: str = None,
+    ):
+        self.component_id = component_id
+        self.component_property = component_property
+        self.allow_optional = allow_optional
+        self.trigger = trigger
+        self.value = value
+
+    def to_obj(self):
+        return dash.Input(component_id=self.component_id,
+                          component_property=self.component_property,
+                          allow_optional=self.allow_optional
+                          )
+
+class State():  # pylint: disable=too-few-public-methods
+    """Use the value of a State in a callback but don't trigger updates."""
+
+    def __init__(
+        self,
+        component_id: ComponentIdType,
+        component_property: str,
+        allow_optional: bool = False,
+        value: str = None,
+    ):
+        self.component_id = component_id
+        self.component_property = component_property
+        self.allow_optional = allow_optional
+        self.value = value
+
+    def to_obj(self):
+        return dash.State(component_id=self.component_id,
+                          component_property=self.component_property,
+                          allow_optional=self.allow_optional
+                          )
+
+class DashHelperGen:
+    def __init__(self, *args, **kwargs):
+        self.inputs = []
+        self.states = []
+        self.outputs = []
+        self.values = []
+
+        kwargs['standalone_mode'] = True
+
+        for arg in args:
+            if isinstance(arg, Input):
+                self.inputs.append(arg.to_obj())
+                self.values.append(arg.value)
+                if arg.trigger is True:
+                    if 'trigger_id' in kwargs:
+                        raise ValueError(f'Trigger ID already set')
+                    if 'trigger_prop' in kwargs:
+                        raise ValueError(f'Trigger Property already set')
+                    kwargs['trigger_id'] = arg.component_id
+                    kwargs['trigger_prop'] = arg.component_property
+
+        for arg in args:
+            if isinstance(arg, State):
+                self.states.append(arg.to_obj())
+                self.values.append(arg.value)
+
+        for arg in args:
+            if isinstance(arg, Output):
+                self.outputs.append(arg.to_obj())
+
+
+        self.dh_obj = DashHelper(self.inputs, self.states, self.outputs, self.values, **kwargs)
