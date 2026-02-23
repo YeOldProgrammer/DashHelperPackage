@@ -1,1 +1,1 @@
-from .dash_helper import dash_helper, DashHelper, Input, State, Output, DashHelperGen, dash_helper_register
+from .dash_callback_helper import dash_callback_helper, DashCallbackHelper, Input, State, Output, DashCallbackHelperGen, dash_callback_helper_register

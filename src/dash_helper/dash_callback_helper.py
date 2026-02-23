@@ -23,12 +23,12 @@ LOG_EVENT_NO_CHANGE = 'no_change'
 LOG_EVENT_ERROR = 'error'
 LOG_EVENT_COMPLETED = 'completed'
 
-LOGGER = logging.getLogger('dash_helper')
+LOGGER = logging.getLogger('dash_callback_helper')
 
 DEBUG_INDENT = '  '
 
 
-class DashHelper:
+class DashCallbackHelper:
     """
     Summarizes Dash callback arguments into a single object.
     Provides easy access to inputs, states, and trigger information.
@@ -429,7 +429,7 @@ class DashHelper:
         return self.debug_str
 
 
-def get_dash_helper_arg(my_kwargs, field_name, default_value=None):
+def get_dash_callback_helper_arg(my_kwargs, field_name, default_value=None):
     """
     Return dash helper arg
     :param my_kwargs: dict of args
@@ -525,10 +525,10 @@ def add_location_info(flat_args, location_id, defined_states, args):
         defined_states.append(new_state)
         args.append(new_state)
 
-def dash_helper(*args, **kwargs):
+def dash_callback_helper(*args, **kwargs):
     """
     Decorator that replaces app.callback.
-    It wraps the callback function, passing a single DashHelper object
+    It wraps the callback function, passing a single DashCallbackHelper object
     instead of the list of input/state values.
     """
     # Flatten args to identify Inputs and States in the order Dash receives them
@@ -547,7 +547,7 @@ def dash_helper(*args, **kwargs):
     line = caller_frame.lineno
 
     my_kwargs = kwargs.copy()
-    app = get_dash_helper_arg(my_kwargs, 'app')
+    app = get_dash_callback_helper_arg(my_kwargs, 'app')
     if app is None:
         app = dash.get_app()
         if app is None:
@@ -555,10 +555,10 @@ def dash_helper(*args, **kwargs):
             LOGGER.error(error)
             raise LookupError(error)
 
-    callback_name = get_dash_helper_arg(my_kwargs, 'callback_name')
-    debug = get_dash_helper_arg(my_kwargs, 'debug')
-    log_on_exit = get_dash_helper_arg(my_kwargs, 'log_on_exit')
-    layout = get_dash_helper_arg(my_kwargs, 'layout')
+    callback_name = get_dash_callback_helper_arg(my_kwargs, 'callback_name')
+    debug = get_dash_callback_helper_arg(my_kwargs, 'debug')
+    log_on_exit = get_dash_callback_helper_arg(my_kwargs, 'log_on_exit')
+    layout = get_dash_callback_helper_arg(my_kwargs, 'layout')
 
     layout_component_ids = find_control_ids(app, callback_name, layout=layout)
     if len(layout_component_ids) == 0:
@@ -583,7 +583,7 @@ def dash_helper(*args, **kwargs):
         add_location_info(flat_args, location_id, defined_states, my_args)
         args = tuple(my_args)
 
-    def display_dash_helper_init():
+    def display_dash_callback_helper_init():
         debug_str = f"Registered Callback [{callback_name}] at {file}:{line}\n"
         layout_info = []
         for component_id, component_type in layout_component_ids.items():
@@ -651,15 +651,15 @@ def dash_helper(*args, **kwargs):
         @app.callback(*args, **my_kwargs)
         def wrapper(*cb_args):
             try:
-                dh = DashHelper(defined_inputs, defined_states, defined_outputs, cb_args,
-                                callback_name=callback_name,
-                                debug=debug,
-                                file=file,
-                                line=line,
-                                log_on_exit=log_on_exit,
-                                location_id=location_id)
+                dh = DashCallbackHelper(defined_inputs, defined_states, defined_outputs, cb_args,
+                                        callback_name=callback_name,
+                                        debug=debug,
+                                        file=file,
+                                        line=line,
+                                        log_on_exit=log_on_exit,
+                                        location_id=location_id)
             except Exception as e:
-                LOGGER.error(f"Error in DashHelper: {e}")
+                LOGGER.error(f"Error in DashCallbackHelper: {e}")
                 return dash.no_update
 
             # If no change, just return no update
@@ -690,19 +690,19 @@ def dash_helper(*args, **kwargs):
         return wrapper
 
     if debug:
-        display_dash_helper_init()
+        display_dash_callback_helper_init()
 
     return decorator
 
 
-def dash_helper_register(*args, **kwargs):
-    func = get_dash_helper_arg(kwargs, 'func')
+def dash_callback_helper_register(*args, **kwargs):
+    func = get_dash_callback_helper_arg(kwargs, 'func')
     if func is None:
-        raise ValueError("dash_helper_register requires a 'func' argument")
+        raise ValueError("dash_callback_helper_register requires a 'func' argument")
 
-    # Call the dash_helper decorator logic
-    # dash_helper returns a decorator, which we then call with the function
-    decorator = dash_helper(*args, **kwargs)
+    # Call the dash_callback_helper decorator logic
+    # dash_callback_helper returns a decorator, which we then call with the function
+    decorator = dash_callback_helper(*args, **kwargs)
     decorator(func)
 
 
@@ -768,7 +768,7 @@ class State():  # pylint: disable=too-few-public-methods
                           allow_optional=self.allow_optional
                           )
 
-class DashHelperGen:
+class DashCallbackHelperGen:
     def __init__(self, *args, **kwargs):
         self.inputs = []
         self.states = []
@@ -799,4 +799,4 @@ class DashHelperGen:
                 self.outputs.append(arg.to_obj())
 
 
-        self.dh_obj = DashHelper(self.inputs, self.states, self.outputs, self.values, **kwargs)
+        self.dh_obj = DashCallbackHelper(self.inputs, self.states, self.outputs, self.values, **kwargs)
