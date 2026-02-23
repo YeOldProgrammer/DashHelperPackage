@@ -8,6 +8,7 @@ Dash helper logic.   Simplify the passing of data into and out of a dash callbac
 import dash
 import inspect
 import dash
+from pathlib import Path
 from dash.dependencies import ComponentIdType
 import json
 import logging
@@ -34,8 +35,10 @@ class DashHelper:
     Provides easy access to inputs, states, and trigger information.
     """
 
-    def __init__(self, inputs_def, states_def, outputs_def, args=None, callback_name=None, debug=False, location_id=None,
-                 log_on_exit=False, file=None, line=None, standalone_mode = False, trigger_id=None, trigger_prop=None,
+    def __init__(self, inputs_def, states_def, outputs_def, args=None,
+                 dash_app_name=None, callback_name=None, debug=False, location_id=None,
+                 log_on_exit=False, file=None, line=None, standalone_mode = False,
+                 trigger_id=None, trigger_prop=None,
                  func=None):
         self.standalone_mode = standalone_mode
         if self.standalone_mode is False:
@@ -53,13 +56,12 @@ class DashHelper:
         self.trigger_id = trigger_id
         self.trigger_prop = trigger_prop
         self.location_params = {}
+        self.dash_app_name = dash_app_name
+        self.callback_name = callback_name
         if args is None:
             args = []
 
-        if isinstance(callback_name, str) and callback_name != '':
-            self._name = callback_name
-        else:
-            self._name = 'default'
+        self._name = format_callback_name(self.dash_app_name, self.callback_name)
         self._inputs = {}
         self._states = {}
         self._outputs = {}
@@ -80,7 +82,7 @@ class DashHelper:
                 key, prop = self._make_key(definition)
             except Exception as e:
                 error_msg = f"[{self._name}] Unable to process input ({count}) '{definition.component_id}': {e}"
-                LOGGER.error(error_msg)
+                LOGGER.error(error_msg, exc_info=True)
                 raise ValueError(error_msg)
 
             if key not in self._inputs:
@@ -95,7 +97,7 @@ class DashHelper:
                 key, prop = self._make_key(definition)
             except Exception as e:
                 error_msg = f"[{self._name}] Unable to process input ({count}) '{definition.component_id}': {e}"
-                LOGGER.error(error_msg)
+                LOGGER.error(error_msg, exc_info=True)
                 raise ValueError(error_msg)
             if key not in self._states:
                 self._states[key] = {}
@@ -120,7 +122,7 @@ class DashHelper:
                 key, prop = self._make_key(definition)
             except Exception as e:
                 error_msg = f"[{self._name}] Unable to process input ({count}) '{definition.component_id}': {e}"
-                LOGGER.error(error_msg)
+                LOGGER.error(error_msg, exc_info=True)
                 raise ValueError(error_msg)
             self._output_order.append({'key': key, 'prop': prop})
             if key not in self._outputs:
@@ -143,12 +145,12 @@ class DashHelper:
                         if helper_key not in mapping_dict:
                             mapping_dict[helper_key] = helper_value
 
-        cp = None
+        control_property = None
         if isinstance(definition, (dash.Input, dash.State, dash.Output)):
-            cid = definition.component_id
-            cp = definition.component_property
+            control_id = definition.component_id
+            control_property = definition.component_property
         elif isinstance(definition, dict):
-            cid = definition
+            control_id = definition
         elif isinstance(definition, str):
             if ':' in definition:
                 definition_list = definition.split(':')
@@ -156,53 +158,53 @@ class DashHelper:
                     error_msg = f"[{self._name}] Key '{definition}' should only have 2 tokens"
                     LOGGER.error(error_msg)
                     raise ValueError(error_msg)
-                cid, cp = definition_list
+                control_id, control_property = definition_list
             else:
-                cid = definition
+                control_id = definition
         else:
             error_msg = f"[{self._name}] Key '{definition}' is not a Input, Output, State object or dict or str"
             LOGGER.error(error_msg)
             raise ValueError(error_msg)
 
         if property_id is not None:
-            cp = property_id
+            control_property = property_id
 
-        if isinstance(cid, dict):
-            if 'type' not in cid:
-                error_msg = f"[{self._name}] Unable to find 'type' in key dict '{cid}'"
+        if isinstance(control_id, dict):
+            if 'type' not in control_id:
+                error_msg = f"[{self._name}] Unable to find 'type' in key dict '{control_id}'"
                 LOGGER.error(error_msg)
                 raise ValueError(error_msg)
 
-            cid = cid['type']
+            control_id = control_id['type']
 
-        elif not isinstance(cid, str):
-            error_msg = f"[{self._name}] Key is not 'str' or 'dict' '{cid}'"
+        elif not isinstance(control_id, str):
+            error_msg = f"[{self._name}] Key is not 'str' or 'dict' '{control_id}'"
             LOGGER.error(error_msg)
             raise ValueError(error_msg)
 
-        if cp is None and isinstance(helper, (list, str)):
-            if cid not in mapping_dict:
-                error_msg = f"[{self._name}] Key '{cid}' does not exist in '{helper}'"
+        if control_property is None and isinstance(helper, (list, str)):
+            if control_id not in mapping_dict:
+                error_msg = f"[{self._name}] Key '{control_id}' does not exist in '{helper}'"
                 LOGGER.error(error_msg)
                 raise ValueError(error_msg)
-            if len(mapping_dict[cid]) != 1:
-                error_msg = f"[{self._name}] Key '{cid}' has multiple property_ids"
+            if len(mapping_dict[control_id]) != 1:
+                error_msg = f"[{self._name}] Key '{control_id}' has multiple property_ids"
                 LOGGER.error(error_msg)
                 raise ValueError(error_msg)
-            cp = list(mapping_dict[cid].keys())[0]
+            control_property = list(mapping_dict[control_id].keys())[0]
 
-        if not isinstance(cp, str):
-            if cid not in mapping_dict:
-                error_msg = f"[{self._name}] Key '{cid}' property is not a str ({cp})"
+        if not isinstance(control_property, str):
+            if control_id not in mapping_dict:
+                error_msg = f"[{self._name}] Key '{control_id}' property is not a str ({control_property})"
                 LOGGER.error(error_msg)
                 raise ValueError(error_msg)
             else:
-                cp_list = list(mapping_dict[cid].keys())
-                error_msg = f"[{self._name}] Key '{cid}' property is not a str ({cp}) valid {cp_list}"
+                control_property_list = list(mapping_dict[control_id].keys())
+                error_msg = f"[{self._name}] Key '{control_id}' property is not a str ({control_property}) valid {control_property_list}"
                 LOGGER.error(error_msg)
                 raise ValueError(error_msg)
 
-        return cid, cp
+        return control_id, control_property
 
     def _find_location(self):
         location_component = self._states.get(self.location_id, {})
@@ -213,10 +215,10 @@ class DashHelper:
             # Remove leading '?' if present
             if params.startswith('?'):
                 params = params[1:]
-            
+
             # Parse query string into a dictionary
             parsed_params = parse_qs(params)
-            
+
             # parse_qs returns values as lists, flatten them if single value
             self.location_params = {k: v[0] if len(v) == 1 else v for k, v in parsed_params.items()}
         else:
@@ -228,7 +230,10 @@ class DashHelper:
         if self.ctx is None:
             return self.trigger_id
 
-        if not self.ctx.triggered:
+        try:
+            if not self.ctx.triggered:
+                return None
+        except LookupError:
             return None
 
         # prop_id is formatted as 'component_id.property'
@@ -249,8 +254,12 @@ class DashHelper:
         if not self.ctx:
             return self.trigger_prop
 
-        if not self.ctx.triggered:
+        try:
+            if not self.ctx.triggered:
+                return None
+        except LookupError:
             return None
+
         return self.ctx.triggered[0]['prop_id'].rsplit('.', 1)[1]
 
     @property
@@ -273,11 +282,11 @@ class DashHelper:
                 LOGGER.error(error_msg)
                 raise ValueError(error_msg)
             output_list.append(self._outputs[key][prop])
-        
+
         # If there is only one output, return the value directly, not a list
         if len(output_list) == 1:
             return output_list[0]
-            
+
         return output_list
 
     @property
@@ -339,7 +348,7 @@ class DashHelper:
             raise ValueError(output)
 
     def _find_callback_io_dict(self, io_list, component_id, property_id=None, allow_invalid=False):
-        key, prop = self._make_key(definition=component_id, property_id=property_id, helper=IO_OUTPUT)
+        key, prop = self._make_key(definition=component_id, property_id=property_id, helper=io_list)
 
         if property_id is not None:
             prop = property_id
@@ -389,7 +398,7 @@ class DashHelper:
 
         return val
 
-    def set(self, component_id, property_id=None, value=dash.no_update):
+    def set(self, component_id, value=dash.no_update, property_id=None):
         """ Set the value of a callbacks output by its ID """
         io_dict, key, prop = self._find_callback_io_dict([IO_OUTPUT], component_id, property_id=property_id)
         io_dict[key][prop] = value
@@ -420,7 +429,13 @@ class DashHelper:
             return
         exc_info = event == LOG_EVENT_ERROR
         dur = (datetime.now(tz=timezone.utc) - self._start).total_seconds()
-        output = f"[{self._name}] {message} (time={dur}s)"
+        if self.trigger_id and self.triggered_prop:
+            output = f"[{self._name}:{self.trigger_id}:{self.triggered_prop}] {message} (time={dur}s)"
+        elif self.trigger_id:
+            output = f"[{self._name}:{self.trigger_id}] {message} (time={dur}s)"
+        else:
+            output = f"[{self._name}:None] {message} (time={dur}s)"
+
         if show_debug is True:
             output += f"\n{self.debug_str}"
         LOGGER.log(log_level, output, exc_info=exc_info)
@@ -444,25 +459,44 @@ def get_dash_helper_arg(my_kwargs, field_name, default_value=None):
     del my_kwargs[field_name]
     return arg_val
 
-def find_control_ids(app, callback_name, layout=None):
+def format_callback_name(dash_app_name, callback_name):
+    if dash_app_name and callback_name:
+        cb_name_str = f'{dash_app_name}:{callback_name}'
+    elif callback_name:
+        cb_name_str = f':{callback_name}'
+    elif dash_app_name:
+        cb_name_str = f'{dash_app_name}:'
+    else:
+        cb_name_str = 'invalid'
+    return cb_name_str
+
+def find_control_ids(app, dash_app_name, callback_name, layout=None):
     # Find location component ID
     control_ids = {}
+    app_layout = None
 
     if layout is None:
         if not hasattr(app, 'layout'):
             raise ValueError('app does not have a layout populated')
-        layout = app.layout
+        app_layout = app.layout
 
-    if not layout:
+    elif callable(layout):
+        app_layout = layout()
+
+    else:
+        app_layout = layout
+
+    if not app_layout:
         raise ValueError('app has a layout but it is is not populated')
 
     try:
-        def find_controls(callback_name, component, my_control_ids):
+        def find_controls(dash_app_name, callback_name, component, my_control_ids):
             if hasattr(component, 'id'):
                 my_type = type(component).__name__
                 if component.id in my_control_ids:
+                    callback_name_str = format_callback_name(dash_app_name, callback_name)
                     raise ValueError(f"Control ID '{component.id}' has been used multiple times in the layout "
-                                     f"'{callback_name}' first='{my_control_ids[component.id]}' second='{my_type}'")
+                                     f"'{callback_name_str}' first='{my_control_ids[component.id]}' second='{my_type}'")
                 else:
                     my_control_ids[component.id] = my_type
 
@@ -470,27 +504,28 @@ def find_control_ids(app, callback_name, layout=None):
                 children = component.children
                 if isinstance(children, list):
                     for child in children:
-                        res = find_controls(callback_name, child, my_control_ids)
+                        res = find_controls(dash_app_name, callback_name, child, my_control_ids)
                         if res: return res
                 elif children:
-                    return find_controls(callback_name, children, my_control_ids)
+                    return find_controls(dash_app_name, callback_name, children, my_control_ids)
             return None
 
-        find_controls(callback_name, layout, control_ids)
+        find_controls(dash_app_name, callback_name, app_layout, control_ids)
 
     except Exception as e:
         raise e
 
     return control_ids
 
-def validate_component(app, callback_name, component_group, component_list, layout_component_ids):
+def validate_component(app, dash_app_name, callback_name, component_group, component_list, layout_component_ids):
     strict = not app.config['suppress_callback_exceptions']
     for callback_component in component_list:
         component_id = callback_component.component_id
         component_type = layout_component_ids.get(component_id, None)
         if not component_type:
             if strict:
-                raise ValueError(f"App '{app.title}' callback '{callback_name}' has {component_group} id '{component_id}' that is not found on layout.   Valid component ids are {list(layout_component_ids.keys())}")
+                cb_name_str = format_callback_name(dash_app_name, callback_name)
+                raise ValueError(f"App '{app.title}' callback '{cb_name_str}' has {component_group} id '{component_id}' that is not found on layout.   Valid component ids are {list(layout_component_ids.keys())}")
 
 def add_location_info(flat_args, location_id, defined_states, args):
     location_pathname_found = False
@@ -542,7 +577,7 @@ def dash_helper(*args, **kwargs):
 
     flatten(args)
 
-    caller_frame = inspect.stack()[1]
+    caller_frame = inspect.stack()[2]
     file = caller_frame.filename
     line = caller_frame.lineno
 
@@ -555,12 +590,16 @@ def dash_helper(*args, **kwargs):
             LOGGER.error(error)
             raise LookupError(error)
 
+    dash_app_name = get_dash_helper_arg(my_kwargs, 'dash_app_name')
+    if not dash_app_name:
+        dash_app_name = Path(file).stem
+
     callback_name = get_dash_helper_arg(my_kwargs, 'callback_name')
     debug = get_dash_helper_arg(my_kwargs, 'debug')
     log_on_exit = get_dash_helper_arg(my_kwargs, 'log_on_exit')
     layout = get_dash_helper_arg(my_kwargs, 'layout')
 
-    layout_component_ids = find_control_ids(app, callback_name, layout=layout)
+    layout_component_ids = find_control_ids(app, dash_app_name, callback_name, layout=layout)
     if len(layout_component_ids) == 0:
         error = f"Dash App '{app.title}' layout has no components found"
         LOGGER.error(error)
@@ -572,9 +611,9 @@ def dash_helper(*args, **kwargs):
     defined_outputs = [x for x in flat_args if isinstance(x, dash.Output)]
 
     # Make sure input / state / output IDs all exist in layout - note not existing is fine
-    validate_component(app, callback_name, 'input', defined_inputs, layout_component_ids)
-    validate_component(app, callback_name, 'state', defined_states, layout_component_ids)
-    validate_component(app, callback_name, 'output', defined_outputs, layout_component_ids)
+    validate_component(app, dash_app_name, callback_name, 'input', defined_inputs, layout_component_ids)
+    validate_component(app, dash_app_name, callback_name, 'state', defined_states, layout_component_ids)
+    validate_component(app, dash_app_name, callback_name, 'output', defined_outputs, layout_component_ids)
     location_id = next((k for k, v in layout_component_ids.items() if v == 'Location'), None)
 
     # If a location is present in the layout, but not present in an input or states, add it in as a state
@@ -584,7 +623,8 @@ def dash_helper(*args, **kwargs):
         args = tuple(my_args)
 
     def display_dash_helper_init():
-        debug_str = f"Registered Callback [{callback_name}] at {file}:{line}\n"
+        cb_name_str = format_callback_name(dash_app_name, callback_name)
+        debug_str = f"Registered Callback [{cb_name_str}] at {file}:{line}\n"
         layout_info = []
         for component_id, component_type in layout_component_ids.items():
             input_list = []
@@ -614,10 +654,15 @@ def dash_helper(*args, **kwargs):
 
         for component in defined_inputs:
             if component.component_id not in layout_component_ids:
+                if hasattr(component, 'component_type'):
+                    component_type = component.component_type
+                else:
+                    component_type = component.__class__.__name__
+
                 layout_info.append({
                     'component_id': component.component_id,
                     'component_type': '???',
-                    'input': component.component_type,
+                    'input': component_type,
                     'state': '',
                     'output': '',
                 })
@@ -652,6 +697,7 @@ def dash_helper(*args, **kwargs):
         def wrapper(*cb_args):
             try:
                 dh = DashHelper(defined_inputs, defined_states, defined_outputs, cb_args,
+                                dash_app_name=dash_app_name,
                                 callback_name=callback_name,
                                 debug=debug,
                                 file=file,
@@ -659,7 +705,7 @@ def dash_helper(*args, **kwargs):
                                 log_on_exit=log_on_exit,
                                 location_id=location_id)
             except Exception as e:
-                LOGGER.error(f"Error in DashHelper: {e}")
+                LOGGER.error(f"Error in DashHelper: {e}", exc_info=True)
                 return dash.no_update
 
             # If no change, just return no update
@@ -684,7 +730,7 @@ def dash_helper(*args, **kwargs):
 
             except Exception as e:
                 dh.callback_log_done(logging.INFO, LOG_EVENT_ERROR, f"Callback Result: Failed: {e}",
-                                     show_debug=True)
+                                     show_debug=True, exc_info=True)
                 return dash.no_update
 
         return wrapper
