@@ -92,14 +92,14 @@ class DashHelper:
         input_vals = args[:num_inputs]
         state_vals = args[num_inputs:]
 
-        co_obj = CallOrigin('__init__')
+        co_obj = CallOrigin('__init__', depth=1)
 
         # Map inputs
         count = 0
         for definition, val in zip(inputs_def, input_vals):
             count += 1
             try:
-                key, prop = self._make_key(definition, co_obj=co_obj, operation='init_input')
+                key, prop = self._make_key(definition, co_obj=co_obj)
             except Exception as e:
                 error_msg = f"[{self._name}] Unable to process input ({count}) '{definition.component_id}': {e}"
                 LOGGER.error(error_msg, exc_info=True)
@@ -114,7 +114,7 @@ class DashHelper:
         for definition, val in zip(states_def, state_vals):
             count += 1
             try:
-                key, prop = self._make_key(definition, co_obj=co_obj, operation='init_state')
+                key, prop = self._make_key(definition, co_obj=co_obj)
             except Exception as e:
                 error_msg = f"[{self._name}] Unable to process input ({count}) '{definition.component_id}': {e}"
                 LOGGER.error(error_msg, exc_info=True)
@@ -139,7 +139,7 @@ class DashHelper:
         for definition in outputs_def:
             count += 1
             try:
-                key, prop = self._make_key(definition, co_obj=co_obj, operation='init_output')
+                key, prop = self._make_key(definition, co_obj=co_obj)
             except Exception as e:
                 error_msg = f"[{self._name}] Unable to process input ({count}) '{definition.component_id}': {e}"
                 LOGGER.error(error_msg, exc_info=True)
@@ -152,7 +152,7 @@ class DashHelper:
         if location_id:
             self._find_location()
 
-    def _make_key(self, definition, property_id=None, helper=None, co_obj=None, operation='unknown'):
+    def _make_key(self, definition, property_id=None, helper=None, co_obj=None):
         """Convert component_id to a hashable key (string or JSON for dicts)."""
         mapping = {IO_OUTPUT: self._outputs, IO_STATE: self._states, IO_INPUT: self._inputs}
         mapping_dict = {}
@@ -175,14 +175,14 @@ class DashHelper:
             if ':' in definition:
                 definition_list = definition.split(':')
                 if len(definition_list) != 2:
-                    error_msg = f"[{self._name}] Key '{definition}' should only have 2 tokens (op={operation})"
+                    error_msg = f"[{self._name}] Key '{definition}' should only have 2 tokens (op={co_obj})"
                     LOGGER.error(error_msg)
                     raise ValueError(error_msg)
                 control_id, control_property = definition_list
             else:
                 control_id = definition
         else:
-            error_msg = f"[{self._name}] Key '{definition}' is not a Input, Output, State object or dict or str (op={operation})"
+            error_msg = f"[{self._name}] Key '{definition}' is not a Input, Output, State object or dict or str (op={co_obj})"
             LOGGER.error(error_msg)
             raise ValueError(error_msg)
 
@@ -191,25 +191,25 @@ class DashHelper:
 
         if isinstance(control_id, dict):
             if 'type' not in control_id:
-                error_msg = f"[{self._name}] Unable to find 'type' in key dict '{control_id}' (op={operation})"
+                error_msg = f"[{self._name}] Unable to find 'type' in key dict '{control_id}' (op={co_obj})"
                 LOGGER.error(error_msg)
                 raise ValueError(error_msg)
 
             control_id = control_id['type']
 
         elif not isinstance(control_id, str):
-            error_msg = f"[{self._name}] Key is not 'str' or 'dict' '{control_id}' (op={operation})"
+            error_msg = f"[{self._name}] Key is not 'str' or 'dict' '{control_id}' (op={co_obj})"
             LOGGER.error(error_msg)
             raise ValueError(error_msg)
 
         if control_property is None and isinstance(helper, (list, str)):
             if control_id not in mapping_dict:
                 mapping_dict_keys = list(mapping_dict.keys())
-                error_msg = f"[{self._name}] Key '{control_id}' does not exist in callbacks {helper} ({self.cb_file}:{self.cb_line}) section(s) ({mapping_dict_keys}) (op={operation})"
+                error_msg = f"[{self._name}] Key '{control_id}' does not exist in callbacks {helper} ({self.cb_file}:{self.cb_line}) section(s) ({mapping_dict_keys}) (op={co_obj})"
                 LOGGER.error(error_msg)
                 raise ValueError(error_msg)
             if len(mapping_dict[control_id]) != 1:
-                error_msg = f"[{self._name}] Key '{control_id}' has multiple property_ids (op={operation}) - check each '{operation}' op for '{control_id}' to make sure it has a property assigned to it"
+                error_msg = f"[{self._name}] Key '{control_id}' has multiple property_ids - check each '{co_obj}' op for '{control_id}' to make sure it has a property assigned to it"
                 LOGGER.error(error_msg)
                 raise ValueError(error_msg)
             control_property = list(mapping_dict[control_id].keys())[0]
@@ -217,13 +217,13 @@ class DashHelper:
         if not isinstance(control_property, (str, bool, int, float)):
             if control_id not in mapping_dict:
                 control_property_list = list(mapping_dict[control_id].keys())
-                error_msg = f"[{self._name}] Key '{control_id}' property is not a str ({control_property}) valid {control_property_list} (op={operation})"
+                error_msg = f"[{self._name}] Key '{control_id}' property is not a str ({control_property}) valid {control_property_list} (op={co_obj})"
                 LOGGER.error(error_msg)
                 raise ValueError(error_msg)
             else:
                 prop_type = type(control_property)
                 prop_name = prop_type.__class__
-                error_msg = f"[{self._name}] Key '{control_id}' property is not a str ({control_property}) type={prop_type} (op={operation})"
+                error_msg = f"[{self._name}] Key '{control_id}' property is not a str ({control_property}) type={prop_type} (op={co_obj})"
                 LOGGER.error(error_msg)
                 raise ValueError(error_msg)
 
@@ -429,10 +429,8 @@ class DashHelper:
             LOGGER.error(output, exc_info=True)
             raise ValueError(output)
 
-    def _find_callback_io_dict(self, io_list, component_id, property_id=None, allow_invalid=False, co_obj=None,
-                               operation='unknown'):
-        key, prop = self._make_key(definition=component_id, property_id=property_id, helper=io_list, co_obj=co_obj,
-                                   operation=operation)
+    def _find_callback_io_dict(self, io_list, component_id, property_id=None, allow_invalid=False, co_obj=None):
+        key, prop = self._make_key(definition=component_id, property_id=property_id, helper=io_list, co_obj=co_obj)
 
         if property_id is not None:
             prop = property_id
@@ -464,10 +462,10 @@ class DashHelper:
     def get(self, component_id, property_id=None, default=None, allow_invalid=False):
         """Retrieve a callback's Input or State value by its ID."""
         # We force allow_invalid=True to support returning the default value if not found
-        co_obj = CallOrigin('get')
+        co_obj = CallOrigin('get', depth=2)
         io_dict, key, prop = self._find_callback_io_dict([IO_INPUT, IO_STATE], component_id,
                                                          property_id=property_id, allow_invalid=allow_invalid,
-                                                         co_obj=co_obj, operation='get')
+                                                         co_obj=co_obj)
 
         # If io_dict is None it means no match was returned, return the default value
         if io_dict is None:
@@ -487,16 +485,16 @@ class DashHelper:
     def set(self, component_id, value=dash.no_update, property_id=None, co_obj=None):
         """ Set the value of a callbacks output by its ID """
         if co_obj is None:
-            co_obj = CallOrigin('set')
+            co_obj = CallOrigin('set', depth=2)
         io_dict, key, prop = self._find_callback_io_dict([IO_OUTPUT], component_id, property_id=property_id,
-                                                         co_obj=co_obj, operation='set')
+                                                         co_obj=co_obj)
         io_dict[key][prop] = value
 
     def set_dict(self, output_dict):
         """ Take a dictionary of output and associated values and call set method on each one """
-        co_obj = CallOrigin('set')
+        co_obj = CallOrigin('set', depth=2)
         for component_id, value in output_dict.items():
-            key, prop = self._make_key(component_id, helper=IO_OUTPUT, co_obj=co_obj, operation='set_dict')
+            key, prop = self._make_key(component_id, helper=IO_OUTPUT, co_obj=co_obj)
             self.set(component_id=component_id, property_id=prop, value=value, co_obj=co_obj)
 
     def set_list(self, output_list):
@@ -971,9 +969,9 @@ class State():  # pylint: disable=too-few-public-methods
                           )
 
 class CallOrigin:
-    def __init__(self, name=None):
+    def __init__(self, name=None, depth=1):
         self.name = name
-        caller_frame = inspect.stack()[1]
+        caller_frame = inspect.stack()[depth]
         self.call_path = caller_frame.filename
         self.call_file = Path(self.call_path).stem
         self.call_line = caller_frame.lineno
