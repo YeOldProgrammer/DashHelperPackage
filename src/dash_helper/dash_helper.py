@@ -514,10 +514,11 @@ class DashHelper:
             value = output_list[idx]
             self.set(component_id=key, property_id=prop, value=value)
 
-    def callback_log_done(self, log_level, event, message, show_debug=False):
+    def callback_log_done(self, log_level, event, message, show_debug=False, exc_info=False):
         if not self.debug and event != LOG_EVENT_NO_CHANGE:
             return
-        exc_info = event == LOG_EVENT_ERROR
+        if exc_info is False:
+            exc_info = event == LOG_EVENT_ERROR
         dur = (datetime.now(tz=timezone.utc) - self._start).total_seconds()
         if self.trigger_id and self.trigger_prop:
             output = f"[{self._name}:{self.trigger_id}:{self.trigger_prop}] {message} (time={dur}s)"
@@ -881,7 +882,7 @@ def dash_helper(*args, **kwargs):
                 return dh.return_value
 
             except Exception as e:
-                dh.callback_log_done(logging.INFO, LOG_EVENT_ERROR, f"Callback Result: Failed: {e}",
+                dh.callback_log_done(logging.ERROR, LOG_EVENT_ERROR, f"Callback Result: Failed: {e}",
                                      show_debug=True, exc_info=True)
                 return dash.no_update
 
