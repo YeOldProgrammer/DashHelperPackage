@@ -37,6 +37,12 @@ TRIGGER_FIELDS = {
     'type': 'trigger_id',
 }
 
+DEFAULT_MAX_DISPLAY_SIZE = 200
+FIELD_DISPLAY_DATA = 'display_data'
+INPUT_FLAGS = {FIELD_DISPLAY_DATA: True}
+STATE_FLAGS = {FIELD_DISPLAY_DATA: True}
+OUTPUT_FLAGS = {FIELD_DISPLAY_DATA: True}
+
 class DashHelper:
     """
     Summarizes Dash callback arguments into a single object.
@@ -47,7 +53,7 @@ class DashHelper:
                  dash_app_name=None, callback_name=None, debug=False, location_id=None,
                  log_on_exit=False, cb_file=None, cb_path=None, cb_line=None, standalone_mode = False,
                  trigger_id=None, trigger_prop=None, skip_no_callback=False, prevent_initial_update=False,
-                 func=None):
+                 func=None, max_display_size=DEFAULT_MAX_DISPLAY_SIZE):
         self.standalone_mode = standalone_mode
         if self.standalone_mode is False:
             self.ctx = dash.callback_context
@@ -75,6 +81,7 @@ class DashHelper:
         self.callback_name = callback_name
         self.skip_no_callback = skip_no_callback
         self.prevent_initial_update = prevent_initial_update
+        self.max_display_size = max_display_size
 
         if args is None:
             args = []
@@ -83,6 +90,9 @@ class DashHelper:
         self._inputs = {}
         self._states = {}
         self._outputs = {}
+        self._inputs_flags = {}
+        self._states_flags = {}
+        self._outputs_flags = {}
         self._output_order = []
         self._start = datetime.now(tz=timezone.utc)
 
@@ -107,6 +117,15 @@ class DashHelper:
 
             if key not in self._inputs:
                 self._inputs[key] = {}
+                self._inputs_flags[key] = {}
+
+            self._inputs_flags[key][prop] = {}
+            for flag_name, flag_default in INPUT_FLAGS.items():
+                if hasattr(definition, flag_name):
+                    self._inputs_flags[key][prop][flag_name] = getattr(definition, flag_name)
+                else:
+                    self._inputs_flags[key][prop][flag_name] = flag_default
+
             self._inputs[key][prop] = val
 
         # Map states
@@ -119,8 +138,18 @@ class DashHelper:
                 error_msg = f"[{self._name}] Unable to process input ({count}) '{definition.component_id}': {e}"
                 LOGGER.error(error_msg, exc_info=True)
                 raise ValueError(error_msg)
+
             if key not in self._states:
                 self._states[key] = {}
+                self._states_flags[key] = {}
+
+            self._states_flags[key][prop] = {}
+            for flag_name, flag_default in STATE_FLAGS.items():
+                if hasattr(definition, flag_name):
+                    self._states_flags[key][prop][flag_name] = getattr(definition, flag_name)
+                else:
+                    self._states_flags[key][prop][flag_name] = flag_default
+
             self._states[key][prop] = val
 
         # Make sure there are no duplicate input & state
@@ -145,12 +174,36 @@ class DashHelper:
                 LOGGER.error(error_msg, exc_info=True)
                 raise ValueError(error_msg)
             self._output_order.append({'key': key, 'prop': prop})
+
             if key not in self._outputs:
                 self._outputs[key] = {}
+                self._outputs_flags[key] = {}
+
+            self._outputs_flags[key][prop] = {}
+            for flag_name, flag_default in OUTPUT_FLAGS.items():
+                if hasattr(definition, flag_name):
+                    self._outputs_flags[key][prop][flag_name] = getattr(definition, flag_name)
+                else:
+                    self._outputs_flags[key][prop][flag_name] = flag_default
+
             self._outputs[key][prop] = dash.no_update
 
         if location_id:
             self._find_location()
+
+        if len(self._inputs) == 0:
+            raise ValueError("No Inputs found")
+        if len(self._outputs) == 0:
+            raise ValueError("No Outputs found")
+
+    def get_property_input(self, control_id, property_id, field, default=None):
+        return self._inputs_flags.get(control_id, {}).get(property_id, {}).get(field, default)
+
+    def get_property_state(self, control_id, property_id, field, default=None):
+        return self._states_flags.get(control_id, {}).get(property_id, {}).get(field, default)
+
+    def get_property_output(self, control_id, property_id, field, default=None):
+        return self._outputs_flags.get(control_id, {}).get(property_id, {}).get(field, default)
 
     def _make_key(self, definition, property_id=None, helper=None, co_obj=None):
         """Convert component_id to a hashable key (string or JSON for dicts)."""
@@ -166,7 +219,7 @@ class DashHelper:
                             mapping_dict[helper_key] = helper_value
 
         control_property = None
-        if isinstance(definition, (dash.Input, dash.State, dash.Output)):
+        if isinstance(definition, (dash.Input, dash.State, dash.Output, Input, State, Output)):
             control_id = definition.component_id
             control_property = definition.component_property
         elif isinstance(definition, dict):
@@ -385,26 +438,49 @@ class DashHelper:
             output_count = len(self._outputs)
             output += f"Inputs ({input_count}):\n"
             for input_id, input_val in self._inputs.items():
-                if 1 == 0:
-                    output += f"    * {input_id}: {input_val}\n"
-                else:
-                    output += f"      {input_id}: {input_val}\n"
+                output += f"    {input_id}:\n"
+                for property, property_val in input_val.items():
+                    trigger = ' '
+                    if input_id in self.trigger_dict and self.trigger_dict[input_id].get('prop') == property:
+                        trigger = '*'
+
+                    if self.get_property_input(input_id, property, FIELD_DISPLAY_DATA, True):
+                        display_val = str(property_val)
+                    else:
+                        display_val = 'not displayed'
+                    if isinstance(display_val, str) and len(display_val) > self.max_display_size:
+                        display_val = display_val[:self.max_display_size] + '...'
+                    output += f"    {trigger} {property}: {display_val}\n"
 
             output += f"States ({states_count}):\n"
             for state_id, state_val in self._states.items():
-                if 1 == 0:
-                    output += f"    * {state_id}: {state_val}\n"
-                else:
-                    output += f"      {state_id}: {state_val}\n"
+                output += f"    {state_id}:\n"
+                for property, property_val in state_val.items():
+                    trigger = ' '
+                    if self.get_property_state(state_id, property, FIELD_DISPLAY_DATA, True):
+                        display_val = str(property_val)
+                    else:
+                        display_val = 'not displayed'
+                    if isinstance(display_val, str) and len(display_val) > self.max_display_size:
+                        display_val = display_val[:self.max_display_size] + '...'
+                    output += f"    {trigger} {property}: {display_val}\n"
 
             output += f"Outputs ({output_count}):\n"
             for output_id, output_val in self._outputs.items():
-                if output_val == dash.no_update:
-                    output += f"      {output_id}: None\n"
-                elif isinstance(output_val, dict) and 'children' in output_val and output_val['children'] == dash.no_update and len(output_val) == 1:
-                    output += f"      {output_id}: {{'children': None}}\n"
-                else:
-                    output += f"      {output_id}: {output_val}\n"
+                output += f"    {output_id}:\n"
+                for property, property_val in output_val.items():
+                    if property_val == dash.no_update:
+                        output += f"      {property}: None\n"
+                    elif isinstance(output_val, dict) and 'children' in output_val and output_val['children'] == dash.no_update and len(output_val) == 1:
+                        output += f"      {property}: {{'children': None}}\n"
+                    else:
+                        display_val = str(property_val)
+                        if self.get_property_output(output_id, property, FIELD_DISPLAY_DATA, True):
+                            if isinstance(display_val, str) and len(display_val) > self.max_display_size:
+                                display_val = display_val[:self.max_display_size] + '...'
+                            output += f"      {property}: {display_val}\n"
+                        else:
+                            output += f"      {property}: not displayed\n"
 
         except Exception as e:
             output = '<<<error generating output>>>'
@@ -453,7 +529,7 @@ class DashHelper:
 
         # If we are here we didn't find a match on the key/prop
         if not allow_invalid:
-            error_msg = f"[{self._name}] io='{io_list}' component_id='{component_id}' property_id='{property_id}'"
+            error_msg = f"[{self._name}] io='{io_list}' component_id='{component_id}' property_id='{property_id}' was not found"
             LOGGER.error(error_msg)
             raise ValueError(error_msg)
 
@@ -519,15 +595,21 @@ class DashHelper:
             exc_info = event == LOG_EVENT_ERROR
         dur = (datetime.now(tz=timezone.utc) - self._start).total_seconds()
         if self.trigger_id and self.trigger_prop:
-            output = f"[{self._name}:{self.trigger_id}:{self.trigger_prop}] {message} (time={dur}s)"
+            base_msg = f"[{self._name}:{self.trigger_id}:{self.trigger_prop}]"
         elif self.trigger_id:
-            output = f"[{self._name}:{self.trigger_id}] {message} (time={dur}s)"
+            base_msg = f"[{self._name}:{self.trigger_id}]"
         else:
-            output = f"[{self._name}:None] {message} (time={dur}s)"
+            base_msg = f"[{self._name}:None]"
+
+        output = f"{base_msg} {message} (time={dur}s)"
 
         if show_debug is True:
             output += f"\n{self.debug_str}"
-        LOGGER.log(log_level, output, exc_info=exc_info)
+
+        try:
+            LOGGER.log(log_level, output, exc_info=exc_info)
+        except Exception as e:
+            LOGGER.error(logging.error, f"{output} - Unable to log encode message - {e}", exc_info=True)
 
     def __str__(self):
         return self.debug_str
@@ -536,7 +618,7 @@ def get_comp_id_index1(component):
     if isinstance(component, dict):
         component_id = component['type']
         component_index = component['index']
-    elif isinstance(component, (dash.Input, dash.State, dash.Output)):
+    elif isinstance(component, (dash.Input, dash.State, dash.Output, Input, State, Output)):
         if hasattr(component, 'component_id'):
             component_id = component.component_id.get('type')
             component_index = component.component_id.get('index')
@@ -557,7 +639,7 @@ def get_comp_id_index2(component):
     if isinstance(component, dict):
         component_id = component['type']
         component_index = component.get('index')
-    elif isinstance(component, (dash.Input, dash.State, dash.Output)):
+    elif isinstance(component, (dash.Input, dash.State, dash.Output, Input, State, Output)):
         if isinstance(component, dict):
             component_id = component.component_id['type']
             component_index = component.component_id.get('index')
@@ -665,7 +747,7 @@ def add_location_info(flat_args, location_id, defined_states, args):
     location_hash_found = False
 
     for component in flat_args:
-        if isinstance(component, dash.Input) or isinstance(component, dash.State):
+        if isinstance(component, (dash.Input, dash.State, Input, State)):
             if component.component_id == location_id:
                 if component.component_property.lower() == 'pathname':
                     location_pathname_found = True
@@ -700,11 +782,31 @@ def dash_helper(*args, **kwargs):
     """
     # Flatten args to identify Inputs and States in the order Dash receives them
     flat_args = []
+    dash_args = []
 
     def flatten(items):
         if isinstance(items, (list, tuple)):
             for i in items: flatten(i)
         else:
+            # Dash
+            if isinstance(items, (dash.Input, dash.State, dash.Output)):
+                dash_args.append(temp_obj)
+
+            # Dash Helper
+            if isinstance(items, Input):
+                temp_obj = dash.Input.__new__(dash.Input)
+                temp_obj.__dict__.update(items.__dict__)
+                dash_args.append(temp_obj)
+            elif isinstance(items, State):
+                temp_obj = dash.State.__new__(dash.State)
+                temp_obj.__dict__.update(items.__dict__)
+                dash_args.append(temp_obj)
+            elif isinstance(items, Output):
+                temp_obj = dash.Output.__new__(dash.Output)
+                temp_obj.__dict__.update(items.__dict__)
+                dash_args.append(temp_obj)
+            else:
+                dash_args.append(items)
             flat_args.append(items)
 
     flatten(args)
@@ -741,9 +843,9 @@ def dash_helper(*args, **kwargs):
         raise ValueError(error)
 
     # Extract definitions
-    defined_inputs = [x for x in flat_args if isinstance(x, dash.Input)]
-    defined_states = [x for x in flat_args if isinstance(x, dash.State)]
-    defined_outputs = [x for x in flat_args if isinstance(x, dash.Output)]
+    defined_inputs = [x for x in flat_args if isinstance(x, (dash.Input, Input))]
+    defined_states = [x for x in flat_args if isinstance(x, (dash.State, State))]
+    defined_outputs = [x for x in flat_args if isinstance(x, (dash.Output, Output))]
 
     # Make sure input / state / output IDs all exist in layout - note not existing is fine
     validate_component(app, dash_app_name, callback_name, 'input', defined_inputs, layout_component_ids)
@@ -840,7 +942,7 @@ def dash_helper(*args, **kwargs):
             a = 1
 
     def decorator(func):
-        @app.callback(*args, **my_kwargs)
+        @app.callback(*dash_args, **my_kwargs)
         def wrapper(*cb_args):
             try:
                 dh = DashHelper(defined_inputs, defined_states, defined_outputs, cb_args,
@@ -912,10 +1014,12 @@ class Output():  # pylint: disable=too-few-public-methods
         component_id: ComponentIdType,
         component_property: str,
         allow_duplicate: bool = False,
+        display_data: bool = True,
     ):
         self.component_id = component_id
         self.component_property = component_property
         self.allow_duplicate = allow_duplicate
+        self.display_data = display_data
 
     def to_obj(self):
         return dash.Output(component_id=self.component_id,
@@ -934,12 +1038,14 @@ class Input():  # pylint: disable=too-few-public-methods
         allow_optional: bool = False,
         trigger: bool = False,
         value: str = None,
+        display_data: bool = True,
     ):
         self.component_id = component_id
         self.component_property = component_property
         self.allow_optional = allow_optional
         self.trigger = trigger
         self.value = value
+        self.display_data = display_data
 
     def to_obj(self):
         return dash.Input(component_id=self.component_id,
@@ -956,11 +1062,13 @@ class State():  # pylint: disable=too-few-public-methods
         component_property: str,
         allow_optional: bool = False,
         value: str = None,
+        display_data: bool = True,
     ):
         self.component_id = component_id
         self.component_property = component_property
         self.allow_optional = allow_optional
         self.value = value
+        self.display_data = display_data
 
     def to_obj(self):
         return dash.State(component_id=self.component_id,
