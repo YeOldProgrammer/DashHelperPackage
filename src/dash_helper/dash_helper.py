@@ -788,11 +788,7 @@ def dash_helper(*args, **kwargs):
         if isinstance(items, (list, tuple)):
             for i in items: flatten(i)
         else:
-            # Dash
-            if isinstance(items, (dash.Input, dash.State, dash.Output)):
-                dash_args.append(temp_obj)
-
-            # Dash Helper
+            # Save Dash objects to dash Helper
             if isinstance(items, Input):
                 temp_obj = dash.Input.__new__(dash.Input)
                 temp_obj.__dict__.update(items.__dict__)
