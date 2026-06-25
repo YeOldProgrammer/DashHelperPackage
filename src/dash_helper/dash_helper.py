@@ -368,7 +368,7 @@ class DashHelper:
                     this_trigger_fields[field] = trigger_dict.get(field, None)
             else:
                 trigger_id = trigger_tok[0]
-                this_trigger_fields['index'] = trigger_tok[0]
+                this_trigger_fields['type'] = trigger_tok[0]
 
             trigger_prop = trigger_tok[1]
             trigger_val = trigger.get('value')
