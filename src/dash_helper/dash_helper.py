@@ -574,8 +574,9 @@ class DashHelper:
             key = component_id.split(':')[0] if ':' in component_id else component_id
 
         if key and key in self._outputs and property_id is not None:
-            # If value is a valid property name but property_id is not, they are likely swapped
-            if value in self._outputs[key] and property_id not in self._outputs[key]:
+            # If value is a valid property name but property_id is not (and not a list or a dict), they are likely swapped
+            if isinstance(value, dict) is False and isinstance(value, list) is False and \
+                    value in self._outputs[key] and property_id not in self._outputs[key]:
                 value, property_id = property_id, value
 
         io_dict, key, prop = self._find_callback_io_dict([IO_OUTPUT], component_id, property_id=property_id,
