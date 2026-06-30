@@ -720,8 +720,9 @@ def find_control_ids(app, dash_app_name, callback_name, layout=None):
                     for child in children:
                         res = find_controls(dash_app_name, callback_name, child, my_control_ids)
                         if res: return res
-                elif children:
-                    return find_controls(dash_app_name, callback_name, children, my_control_ids)
+                elif children is not None:
+                    res = find_controls(dash_app_name, callback_name, children, my_control_ids)
+                    if res: return res
             return None
 
         find_controls(dash_app_name, callback_name, app_layout, control_ids)
