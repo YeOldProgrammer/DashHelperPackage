@@ -605,7 +605,7 @@ class DashHelper:
             self.set(component_id=key, property_id=prop, value=value)
 
     def callback_log_done(self, log_level, event, message, show_debug=False, exc_info=False):
-        if not self.debug and event != LOG_EVENT_NO_CHANGE:
+        if not self.debug and event != LOG_EVENT_NO_CHANGE and event != LOG_EVENT_ERROR:
             return
         if exc_info is False:
             exc_info = event == LOG_EVENT_ERROR
