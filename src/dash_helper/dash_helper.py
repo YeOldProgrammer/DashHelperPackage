@@ -5,7 +5,6 @@ Dash helper logic.   Simplify the passing of data into and out of a dash callbac
   - enhanced logging / debugging
   - easier to detach callback to allow for standalone testing
 """
-import dash
 import inspect
 import dash
 from pathlib import Path
@@ -16,7 +15,6 @@ import copy
 from datetime import datetime, timezone
 from urllib.parse import parse_qs
 
-from sqlalchemy import values
 from tabulate import tabulate
 
 IO_INPUT = 'input'
@@ -392,6 +390,11 @@ class DashHelper:
             self.trigger_id_str = self.trigger_id
 
     @property
+    def triggered_id(self):
+        """Returns the ID of the component that triggered the callback."""
+        return self.trigger_id
+
+    @property
     def return_value(self):
         """
         The callback should return a list of values as defined by the callbacks output object.   Map the output
@@ -562,6 +565,19 @@ class DashHelper:
         """ Set the value of a callbacks output by its ID """
         if co_obj is None:
             co_obj = CallOrigin('set', depth=2)
+        
+        # Auto-detect if property_id and value are swapped
+        key = None
+        if isinstance(component_id, dict):
+            key = component_id.get('type')
+        elif isinstance(component_id, str):
+            key = component_id.split(':')[0] if ':' in component_id else component_id
+
+        if key and key in self._outputs and property_id is not None:
+            # If value is a valid property name but property_id is not, they are likely swapped
+            if value in self._outputs[key] and property_id not in self._outputs[key]:
+                value, property_id = property_id, value
+
         io_dict, key, prop = self._find_callback_io_dict([IO_OUTPUT], component_id, property_id=property_id,
                                                          co_obj=co_obj)
         io_dict[key][prop] = value
@@ -617,11 +633,16 @@ class DashHelper:
 def get_comp_id_index1(component):
     if isinstance(component, dict):
         component_id = component['type']
-        component_index = component['index']
+        component_index = component.get('index')
     elif isinstance(component, (dash.Input, dash.State, dash.Output, Input, State, Output)):
         if hasattr(component, 'component_id'):
-            component_id = component.component_id.get('type')
-            component_index = component.component_id.get('index')
+            comp_id = component.component_id
+            if isinstance(comp_id, dict):
+                component_id = comp_id.get('type')
+                component_index = comp_id.get('index')
+            else:
+                component_id = comp_id
+                component_index = None
         else:
             raise ValueError("missing property")
     else:
@@ -629,6 +650,7 @@ def get_comp_id_index1(component):
         component_index = None
 
     return component_id, component_index
+
 
 def get_comp_id_index2(component):
     if hasattr(component, 'component_type'):
@@ -640,10 +662,7 @@ def get_comp_id_index2(component):
         component_id = component['type']
         component_index = component.get('index')
     elif isinstance(component, (dash.Input, dash.State, dash.Output, Input, State, Output)):
-        if isinstance(component, dict):
-            component_id = component.component_id['type']
-            component_index = component.component_id.get('index')
-        elif isinstance(component.component_id, str):
+        if isinstance(component.component_id, str):
             component_id = component.component_id
             component_index = None
         elif isinstance(component.component_id, dict):
