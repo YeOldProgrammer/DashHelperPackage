@@ -25,7 +25,15 @@ LOG_EVENT_NO_CHANGE = 'no_change'
 LOG_EVENT_ERROR = 'error'
 LOG_EVENT_COMPLETED = 'completed'
 
-LOGGER = logging.getLogger('dash_helper')
+TRIGGER_LOG_ALL = 'all'
+TRIGGER_LOG_DISPLAY_LABEL = 'display_value'
+TRIGGER_DISPLAY_INPUT = 'display_input'
+TRIGGER_DISPLAY_OUTPUT = 'display_output'
+TRIGGER_EXCLUDE = 'exclude'
+TRIGGER_LOG_FUNC_START = 'display_func_start'
+TRIGGER_LOG_FUNC_END = 'display_func_end'
+
+TRIGGER_LOG_DEFAULT = {TRIGGER_LOG_ALL: {}}
 
 DEBUG_INDENT = '  '
 DEBUG_CALL_BACK = 'admin:update_user_table'
@@ -61,7 +69,7 @@ class DashHelper:
         self.cb_file = cb_file
         self.cb_path = cb_path
         self.cb_line = cb_line
-        self.debug = debug
+        self.debug_raw = debug
         self.log_on_exit = log_on_exit
         self.location_id = location_id
         self.location_pathname = None
@@ -84,7 +92,7 @@ class DashHelper:
         if args is None:
             args = []
 
-        self._name = format_callback_name(self.dash_app_name, self.callback_name)
+        self._name = None
         self._inputs = {}
         self._states = {}
         self._outputs = {}
@@ -93,6 +101,7 @@ class DashHelper:
         self._outputs_flags = {}
         self._output_order = []
         self._start = datetime.now(tz=timezone.utc)
+        self.debug = self.is_debug(debug)
 
         # Dash passes arguments as a flattened list: [...inputs, ...states]
         # We map these values back to their definitions based on the order they were defined.
@@ -565,7 +574,7 @@ class DashHelper:
         """ Set the value of a callbacks output by its ID """
         if co_obj is None:
             co_obj = CallOrigin('set', depth=2)
-        
+
         # Auto-detect if property_id and value are swapped
         key = None
         if isinstance(component_id, dict):
@@ -604,6 +613,67 @@ class DashHelper:
             prop = self._output_order[idx]['prop']
             value = output_list[idx]
             self.set(component_id=key, property_id=prop, value=value)
+
+    def view_output(self, component_id, property_id=None, default=None, allow_invalid=False):
+        """Retrieve a callback's output ID."""
+        # We force allow_invalid=True to support returning the default value if not found
+        co_obj = CallOrigin('view_output', depth=2)
+        io_dict, key, prop = self._find_callback_io_dict([IO_OUTPUT], component_id,
+                                                         property_id=property_id, allow_invalid=allow_invalid,
+                                                         co_obj=co_obj)
+
+        # If io_dict is None it means no match was returned, return the default value
+        if io_dict is None:
+            return default
+
+        return io_dict[key][prop]
+
+    def is_debug(self, debug):
+        if debug is None or debug is False:
+            self._name = format_callback_name(self.dash_app_name, self.callback_name)
+            return False
+
+        if debug is True:
+            self._name = format_callback_name(self.dash_app_name, self.callback_name)
+            return True
+
+        if isinstance(debug, str):
+            if debug == self.trigger_id_str:
+                self._name = format_callback_name(self.dash_app_name, self.callback_name)
+                return True
+            if debug == f"{self.trigger_id_str}:{self.trigger_prop}":
+                self._name = format_callback_name(self.dash_app_name, self.callback_name)
+                return True
+            if debug == TRIGGER_LOG_ALL:
+                self._name = format_callback_name(self.dash_app_name, self.callback_name)
+                return True
+
+        elif isinstance(debug, dict):
+            trigger_key = None
+            if self.trigger_id_str in debug:
+                trigger_key = self.trigger_id_str
+            else:
+                temp_key = f"{self.trigger_id_str}:{self.trigger_prop}"
+                if temp_key in debug:
+                    trigger_key = temp_key
+                elif TRIGGER_LOG_ALL in debug:
+                    trigger_key = TRIGGER_LOG_ALL
+                elif TRIGGER_LOG_ALL.upper() in debug:
+                    trigger_key = TRIGGER_LOG_ALL.upper()
+
+            if trigger_key:
+                if isinstance(debug[trigger_key], str):
+                    self._name = debug[trigger_key]
+                    return True
+
+                if not isinstance(debug[trigger_key], dict):
+                    raise ValueError(f"Invalid trigger value '{debug[trigger_key]}' - must be a str or dict")
+
+                trigger_dict = debug[trigger_key]
+                if TRIGGER_LOG_DISPLAY_LABEL in trigger_dict:
+                    self._name = trigger_dict[TRIGGER_LOG_DISPLAY_LABEL]
+
+        raise ValueError(f"Unexpected debug value type={type(debug)} value='{debug}'")
 
     def callback_log_done(self, log_level, event, message, show_debug=False, exc_info=False):
         if not self.debug and event != LOG_EVENT_NO_CHANGE and event != LOG_EVENT_ERROR:
@@ -727,12 +797,17 @@ def find_control_ids(app, dash_app_name, callback_name, layout=None):
         def find_controls(dash_app_name, callback_name, component, my_control_ids):
             if hasattr(component, 'id'):
                 my_type = type(component).__name__
-                if component.id in my_control_ids:
-                    callback_name_str = format_callback_name(dash_app_name, callback_name)
-                    raise ValueError(f"Control ID '{component.id}' has been used multiple times in the layout "
-                                     f"'{callback_name_str}' first='{my_control_ids[component.id]}' second='{my_type}'")
+                if isinstance(component.id, dict) and 'type' in component.id:
+                    control_id = component.id['type']
                 else:
-                    my_control_ids[component.id] = my_type
+                    control_id = component.id
+
+                if control_id in my_control_ids:
+                    callback_name_str = format_callback_name(dash_app_name, callback_name)
+                    raise ValueError(f"Control ID '{control_id}' has been used multiple times in the layout "
+                                     f"'{callback_name_str}' first='{my_control_ids[control_id]}' second='{my_type}'")
+                else:
+                    my_control_ids[control_id] = my_type
 
             if hasattr(component, 'children'):
                 children = component.children
@@ -834,6 +909,7 @@ def dash_helper(*args, **kwargs):
     cb_line = caller_frame.lineno
 
     my_kwargs = kwargs.copy()
+    log_trigger_config = my_kwargs.pop('log_trigger_config', None)
     app = get_dash_helper_arg(my_kwargs, 'app')
     if app is None:
         app = dash.get_app()
@@ -880,10 +956,6 @@ def dash_helper(*args, **kwargs):
         cb_name_str = format_callback_name(dash_app_name, callback_name)
         debug_str = f"Registered Callback [{cb_name_str}] at {cb_file}:{cb_line} (prevent_initial_update={prevent_initial_update})\n"
         layout_info = []
-
-        # TODO Remove
-        if cb_name_str == DEBUG_CALL_BACK:
-            a = 1
 
         for callback_component, component_type in layout_component_ids.items():
             input_list = []
@@ -954,10 +1026,6 @@ def dash_helper(*args, **kwargs):
         debug_str += DEBUG_INDENT + table_str + '\n'
         LOGGER.info(debug_str)
 
-        # TODO Remove
-        if cb_name_str == DEBUG_CALL_BACK:
-            a = 1
-
     def decorator(func):
         @app.callback(*dash_args, **my_kwargs)
         def wrapper(*cb_args):
@@ -978,12 +1046,88 @@ def dash_helper(*args, **kwargs):
                 LOGGER.error(f"Error in DashHelper: {e}", exc_info=True)
                 return dash.no_update
 
+            # Determine if logging functionality should be triggered
+            trigger_match = False
+            trigger_key = None
+            display_trigger_id = None
+            sub_cfg = None
+            if log_trigger_config:
+                try:
+                    is_excluded = False
+
+                    # Check for exclude list
+                    if isinstance(log_trigger_config, dict):
+                        exclude_list = log_trigger_config.get('exclude', [])
+                        if not isinstance(exclude_list, list):
+                            exclude_list = [exclude_list]
+                        if dh.raw_trigger_id in exclude_list or dh.trigger_id_str in exclude_list:
+                            is_excluded = True
+
+                        if TRIGGER_LOG_ALL in log_trigger_config and not is_excluded:
+                            all_cfg = log_trigger_config[TRIGGER_LOG_ALL]
+                            if isinstance(all_cfg, dict):
+                                all_exclude = all_cfg.get('exclude', [])
+                                if not isinstance(all_exclude, list):
+                                    all_exclude = [all_exclude]
+                                if dh.raw_trigger_id in all_exclude or dh.trigger_id_str in all_exclude:
+                                    is_excluded = True
+
+                    if not is_excluded:
+                        if isinstance(log_trigger_config, dict):
+                            if dh.trigger_id_str in log_trigger_config:
+                                trigger_key = dh.trigger_id_str
+                                trigger_match = True
+                            elif TRIGGER_LOG_ALL in log_trigger_config:
+                                trigger_key = TRIGGER_LOG_ALL
+                                trigger_match = True
+                        elif isinstance(log_trigger_config, list):
+                            if dh.trigger_id_str in log_trigger_config:
+                                trigger_key = dh.trigger_id_str
+                                trigger_match = True
+                            elif TRIGGER_LOG_ALL in log_trigger_config:
+                                trigger_key = TRIGGER_LOG_ALL
+                                trigger_match = True
+                        elif isinstance(log_trigger_config, str):
+                            if log_trigger_config == TRIGGER_LOG_ALL:
+                                trigger_key = TRIGGER_LOG_ALL
+                                trigger_match = True
+                            elif dh.trigger_id_str == log_trigger_config:
+                                trigger_key = log_trigger_config
+                                trigger_match = True
+                        else:
+                            raise ValueError(f"log_trigger_config must be str, dict or list")
+
+                except Exception as e:
+                    LOGGER.error(f"Warning exception processing trigger information: {e}", exc_info=True)
+
+                if trigger_match is True:
+                    if isinstance(log_trigger_config, dict):
+                        sub_cfg = log_trigger_config[trigger_key]
+                        display_trigger_id = sub_cfg.get(TRIGGER_LOG_DISPLAY_LABEL)
+
+                    if isinstance(log_trigger_config, list):
+                        display_trigger_id = sub_cfg.get('display_trigger_id', dh.raw_trigger_id or dh.trigger_id_str) if isinstance(sub_cfg, dict) else (dh.trigger_id_str or dh.raw_trigger_id)
+
+                    if display_trigger_id is None:
+                        display_trigger_id = sub_cfg.get('display_trigger_id', dh.raw_trigger_id or dh.trigger_id_str) if isinstance(sub_cfg, dict) else (dh.trigger_id_str or dh.raw_trigger_id)
+
+                    if isinstance(display_trigger_id, list) and len(display_trigger_id) > 0:
+                        if isinstance(display_trigger_id[0], dict) and 'prop_id' in display_trigger_id[0]:
+                            display_trigger_id = display_trigger_id[0]['prop_id']
+
+            if trigger_match is True:
+                dash_helper_log_cb_handler(dh, trigger=TRIGGER_LOG_FUNC_START, sub_cfg=sub_cfg,
+                                           display_trigger_id=display_trigger_id)
+
             # If no change, just return no update
             if dh.raw_trigger_id is None and (dh.skip_no_callback is True or dh.prevent_initial_update is True):
                 dh.callback_log_done(logging.DEBUG, LOG_EVENT_NO_CHANGE, "Callback Result: No change",
                                      show_debug=dh.log_on_exit)
                 return dash.no_update
 
+            status_code = 200
+            import time
+            start_time = time.perf_counter()
             try:
                 return_value = func(dh)
 
@@ -999,9 +1143,16 @@ def dash_helper(*args, **kwargs):
                 return dh.return_value
 
             except Exception as e:
+                status_code = 500
                 dh.callback_log_done(logging.ERROR, LOG_EVENT_ERROR, f"Callback Result: Failed: {e}",
                                      show_debug=True, exc_info=True)
                 return dash.no_update
+
+            finally:
+                if trigger_match is True:
+                    dur = time.perf_counter() - start_time
+                    dash_helper_log_cb_handler(dh, trigger=TRIGGER_LOG_FUNC_END, sub_cfg=sub_cfg,
+                                               display_trigger_id=display_trigger_id, dur=dur, status_code=status_code)
 
         return wrapper
 
@@ -1009,6 +1160,107 @@ def dash_helper(*args, **kwargs):
         display_dash_helper_init()
 
     return decorator
+
+
+def dash_helper_log_cb_handler(dh, trigger, sub_cfg, display_trigger_id, dur=0, status_code=999):
+    try:
+        if isinstance(sub_cfg, dict):
+            trigger_func = sub_cfg.get(trigger)
+
+        if trigger == TRIGGER_LOG_FUNC_START:
+            if trigger_func:
+                trigger_func(dh, sub_cfg, display_trigger_id)
+            else:
+                dash_helper_log_cb_start(dh, sub_cfg, display_trigger_id)
+
+        elif trigger == TRIGGER_LOG_FUNC_END:
+            if trigger_func:
+                trigger_func(dh, sub_cfg, display_trigger_id, dur, status_code)
+            else:
+                dash_helper_log_cb_end(dh, sub_cfg, display_trigger_id, dur, status_code)
+
+    except Exception as e:
+        LOGGER.error(f"Failed to log - trigger={trigger} - {e}", exc_info=True)
+
+
+def set_uuid():
+    import uuid
+    from flask import session
+    try:
+        session['current_correlation_id'] = str(uuid.uuid4())
+    except Exception:
+        pass
+
+
+def dash_helper_log_cb_start(dh, sub_cfg, display_trigger_id):
+    set_uuid()
+    start_msg = f"Callback [start] - Page: {dh.dash_app_name}, Trigger: {display_trigger_id} ({dh.cb_file}:{dh.cb_line})"
+
+    extra_dict = {
+        'dash_app': dh.dash_app_name,
+        'trigger': display_trigger_id,
+        'state': 'start',
+        'cb_file': dh.cb_file,
+        'cb_line': dh.cb_line,
+    }
+
+    if sub_cfg and TRIGGER_DISPLAY_INPUT in sub_cfg:
+        input_log_parts = []
+        for field in sub_cfg[TRIGGER_DISPLAY_INPUT]:
+            val = None
+            key = field
+            prop = None
+            if ':' in field:
+                key, prop = field.split(':', 1)
+            if key in dh._inputs:
+                if prop is None:
+                    prop = list(dh._inputs[key].keys())[0]
+                val = dh._inputs[key].get(prop)
+            elif key in dh._states:
+                if prop is None:
+                    prop = list(dh._states[key].keys())[0]
+                val = dh._states[key].get(prop)
+            extra_dict[field] = val
+            input_log_parts.append(f"{field}={val}")
+
+        if input_log_parts:
+            start_msg += f" | Inputs: {', '.join(input_log_parts)}"
+
+    LOGGER.info(start_msg, extra=extra_dict)
+
+
+def dash_helper_log_cb_end(dh, sub_cfg, display_trigger_id, dur, status_code):
+    end_msg = f"Callback [end]   - Page: {dh.dash_app_name}, Trigger: {display_trigger_id} | status={status_code} | duration={dur:.2f}s ({dh.cb_file}:{dh.cb_line})"
+
+    extra_dict = {
+        'dash_app': dh.dash_app_name,
+        'trigger': display_trigger_id,
+        'state': 'start',
+        'cb_file': dh.cb_file,
+        'cb_line': dh.cb_line,
+        'dur': dur,
+        'status_code': status_code,
+    }
+
+    if sub_cfg and TRIGGER_DISPLAY_OUTPUT in sub_cfg:
+        output_log_parts = []
+        for field in sub_cfg[TRIGGER_DISPLAY_OUTPUT]:
+            val = None
+            key = field
+            prop = None
+            if ':' in field:
+                key, prop = field.split(':', 1)
+            if key in dh._outputs:
+                if prop is None:
+                    prop = list(dh._outputs[key].keys())[0]
+                val = dh._outputs[key].get(prop)
+            extra_dict[field] = val
+            output_log_parts.append(f"{field}={val}")
+
+        if output_log_parts:
+            end_msg += f" | Outputs: {', '.join(output_log_parts)}"
+
+    LOGGER.info(end_msg, extra=extra_dict)
 
 
 def dash_helper_register(*args, **kwargs):
