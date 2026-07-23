@@ -45,6 +45,21 @@ TRIGGER_FIELDS = {
     'type': 'trigger_id',
 }
 
+def register_trigger_fields(fields):
+    """
+    Globally register custom trigger field mappings for DashHelper callbacks.
+
+    Accepts:
+    - a list/tuple/set of field names e.g. ['county', 'target', 'action']
+    - a dict of field-to-attribute mappings e.g. {'county': 'trigger_county'}
+    """
+    if isinstance(fields, (list, tuple, set)):
+        for field in fields:
+            if field not in TRIGGER_FIELDS:
+                TRIGGER_FIELDS[field] = f"trigger_{field}"
+    elif isinstance(fields, dict):
+        TRIGGER_FIELDS.update(fields)
+
 DEFAULT_MAX_DISPLAY_SIZE = 200
 FIELD_DISPLAY_DATA = 'display_data'
 INPUT_FLAGS = {FIELD_DISPLAY_DATA: True}
@@ -368,12 +383,12 @@ class DashHelper:
                 except json.JSONDecodeError:
                     raise ValueError("Unexpected trigger prop_id")
 
-                trigger_id = trigger_dict.get('index')
+                trigger_id = trigger_dict.get('index') or trigger_dict.get('type') or 'unknown'
                 for field in trigger_dict.keys():
                     if field not in TRIGGER_FIELDS:
-                        LOGGER.warning(f"Unexpected trigger field '{field}' found for trigger '{trigger_id}'")
+                        LOGGER.debug(f"Custom trigger field '{field}' found for trigger '{trigger_id}'")
 
-                for field in TRIGGER_FIELDS.keys():
+                for field in set(list(TRIGGER_FIELDS.keys()) + list(trigger_dict.keys())):
                     this_trigger_fields[field] = trigger_dict.get(field, None)
             else:
                 trigger_id = trigger_tok[0]
@@ -383,8 +398,9 @@ class DashHelper:
             trigger_val = trigger.get('value')
 
             if idx == 0:
-                for field, field_name in TRIGGER_FIELDS.items():
-                    setattr(self, field_name, this_trigger_fields.get(field))
+                for field, val in this_trigger_fields.items():
+                    field_name = TRIGGER_FIELDS.get(field, f"trigger_{field}")
+                    setattr(self, field_name, val)
                 self.trigger_prop = trigger_prop
                 self.trigger_val = trigger_val
 
@@ -911,6 +927,10 @@ def dash_helper(*args, **kwargs):
     cb_line = caller_frame.lineno
 
     my_kwargs = kwargs.copy()
+    trigger_fields = my_kwargs.pop('extra_trigger_fields', None)
+    if trigger_fields:
+        register_trigger_fields(trigger_fields)
+
     log_trigger_config = my_kwargs.pop('log_trigger_config', None)
     app = get_dash_helper_arg(my_kwargs, 'app')
     if app is None:
