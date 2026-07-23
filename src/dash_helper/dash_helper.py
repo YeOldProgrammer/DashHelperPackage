@@ -1184,20 +1184,56 @@ def dash_helper(*args, **kwargs):
     return decorator
 
 
+GLOBAL_LOG_CB_START = None
+GLOBAL_LOG_CB_END = None
+
+
+def register_log_cb_start(func):
+    """
+    Globally register a custom default logging function for callback start.
+    """
+    global GLOBAL_LOG_CB_START
+    GLOBAL_LOG_CB_START = func
+
+
+def register_log_cb_end(func):
+    """
+    Globally register a custom default logging function for callback end.
+    """
+    global GLOBAL_LOG_CB_END
+    GLOBAL_LOG_CB_END = func
+
+
+def register_log_cb_functions(func_start=None, func_end=None):
+    """
+    Globally register custom default logging functions for callback start and/or end
+    to override the built-in defaults.
+    """
+    if func_start is not None:
+        register_log_cb_start(func_start)
+    if func_end is not None:
+        register_log_cb_end(func_end)
+
+
 def dash_helper_log_cb_handler(dh, trigger, sub_cfg, display_trigger_id, dur=0, status_code=999):
     try:
+        trigger_func = None
         if isinstance(sub_cfg, dict):
             trigger_func = sub_cfg.get(trigger)
 
         if trigger == TRIGGER_LOG_FUNC_START:
             if trigger_func:
                 trigger_func(dh, sub_cfg, display_trigger_id)
+            elif GLOBAL_LOG_CB_START:
+                GLOBAL_LOG_CB_START(dh, sub_cfg, display_trigger_id)
             else:
                 dash_helper_log_cb_start(dh, sub_cfg, display_trigger_id)
 
         elif trigger == TRIGGER_LOG_FUNC_END:
             if trigger_func:
                 trigger_func(dh, sub_cfg, display_trigger_id, dur, status_code)
+            elif GLOBAL_LOG_CB_END:
+                GLOBAL_LOG_CB_END(dh, sub_cfg, display_trigger_id, dur, status_code)
             else:
                 dash_helper_log_cb_end(dh, sub_cfg, display_trigger_id, dur, status_code)
 
