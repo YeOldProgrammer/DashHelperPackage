@@ -17,6 +17,8 @@ from urllib.parse import parse_qs
 
 from tabulate import tabulate
 
+LOGGER = logging.getLogger('dash_helper')
+
 IO_INPUT = 'input'
 IO_STATE = 'state'
 IO_OUTPUT = 'output'
