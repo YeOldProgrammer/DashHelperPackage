@@ -803,6 +803,7 @@ def find_control_ids(app, dash_app_name, callback_name, layout=None):
         app_layout = app.layout
 
     elif callable(layout):
+        set_uuid(overwrite=True)
         app_layout = layout()
 
     else:
@@ -1254,13 +1255,31 @@ def dash_helper_log_cb_handler(dh, trigger, sub_cfg, display_trigger_id, dur=0, 
         LOGGER.error(f"Failed to log - trigger={trigger} - {e}", exc_info=True)
 
 
-def set_uuid():
+def set_uuid(new_uuid=None, overwrite=False):
     import uuid
-    from flask import session
+    from flask import session, has_request_context
     try:
-        session['current_correlation_id'] = str(uuid.uuid4())
+        from utils.tracing_context import get_trace_context, set_trace_correlation_id
+        if not overwrite and not new_uuid:
+            existing = get_trace_context().get("X-Correlation-ID")
+            if existing:
+                return existing
     except Exception:
         pass
+
+    val = new_uuid or str(uuid.uuid4())
+    try:
+        from utils.tracing_context import set_trace_correlation_id
+        set_trace_correlation_id(val)
+    except Exception:
+        pass
+
+    if has_request_context():
+        try:
+            session['current_correlation_id'] = val
+        except Exception:
+            pass
+    return val
 
 
 def dash_helper_log_cb_start(dh, sub_cfg, display_trigger_id):
