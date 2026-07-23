@@ -1137,6 +1137,19 @@ def dash_helper(*args, **kwargs):
                         if isinstance(display_trigger_id[0], dict) and 'prop_id' in display_trigger_id[0]:
                             display_trigger_id = display_trigger_id[0]['prop_id']
 
+                    if isinstance(display_trigger_id, dict) and 'type' in display_trigger_id:
+                        display_trigger_id = display_trigger_id['type']
+                    elif isinstance(display_trigger_id, str) and '"type"' in display_trigger_id:
+                        if '.' in display_trigger_id:
+                            try:
+                                tmp_tokens = display_trigger_id.split('.')
+                                prop = '.'.join(tmp_tokens[1:])
+                                tmp_dict = json.loads(tmp_tokens[0])
+                                if 'type' in tmp_dict:
+                                    display_trigger_id = tmp_dict['type'] + '.' + prop
+                            except Exception as e:
+                                pass
+
             if trigger_match is True:
                 dash_helper_log_cb_handler(dh, trigger=TRIGGER_LOG_FUNC_START, sub_cfg=sub_cfg,
                                            display_trigger_id=display_trigger_id)
